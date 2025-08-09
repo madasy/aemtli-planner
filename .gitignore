@@ -61,3 +61,4 @@ temp/
 
 # Local testing files
 *.local
+node_modules/
