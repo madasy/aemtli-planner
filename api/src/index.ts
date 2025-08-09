@@ -157,10 +157,18 @@ app.patch("/api/assignment/:id", async (req: Request, res: Response) => {
 /**
  * People list for admin sidebar
  */
+// People list (with pool flags)
 app.get("/api/people", async (_req: Request, res: Response) => {
-  const people = await prisma.person.findMany({ orderBy: { name: "asc" } });
-  res.json(people);
+  const peopleDb = await prisma.person.findMany({ orderBy: { name: "asc" } });
+  const resp = peopleDb.map(p => ({
+    id: p.id,
+    name: p.name,
+    activeWeekly:   PEOPLE_WEEKLY.includes(p.name),
+    activeBiweekly: PEOPLE_BIWEEKLY.includes(p.name),
+  }));
+  res.json(resp);
 });
+
 
 /**
  * ICS for a given person from the latest PUBLISHED plan
