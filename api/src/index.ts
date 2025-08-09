@@ -21,10 +21,25 @@ app.get("/", (_req: Request, res: Response) => res.send("Ämtli API OK"));
  *    biweekly = activeBiweekly === true
  *    honors person.exceptions (skip those tasks)
  */
-app.post("/api/plan/generate", async (_req: Request, res: Response) => {
-  const start = nextMonday();
+app.post("/api/plan/generate", async (req: Request, res: Response) => {
+  // 1) Get the start date from the request body, or default to nextMonday()
+  const startDateFromRequest = req.body.startDate;
+  const start = startDateFromRequest ? new Date(startDateFromRequest) : nextMonday();
 
-  // 1) ensure tasks exist/updated (incl. offsetWeeks)
+  // 2) Shuffle the people lists before they are assigned
+  // You need a shuffle function; a common one is the Fisher-Yates algorithm.
+  const shuffle = (array) => {
+    let currentIndex = array.length, randomIndex;
+    while (currentIndex !== 0) {
+      randomIndex = Math.floor(Math.random() * currentIndex);
+      currentIndex--;
+      [array[currentIndex], array[randomIndex]] = [array[randomIndex], array[currentIndex]];
+    }
+    return array;
+  };
+
+  // 3) All your existing code...
+  // ensure tasks exist/updated (incl. offsetWeeks)
   for (const t of TASKS) {
     await prisma.task.upsert({
       where: { slug: t.slug },
@@ -33,7 +48,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     });
   }
 
-  // 2) remove old DRAFT(s) and their assignments (as requested)
+  // remove old DRAFT(s) and their assignments (as requested)
   const drafts = await prisma.plan.findMany({ where: { status: "draft" }, select: { id: true } });
   if (drafts.length) {
     const draftIds = drafts.map(d => d.id);
@@ -41,7 +56,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     await prisma.plan.deleteMany({ where: { id: { in: draftIds } } });
   }
 
-  // 3) fetch tasks for scheduler
+  // fetch tasks for scheduler
   const dbTasksRaw = await prisma.task.findMany({ orderBy: { id: "asc" } });
   const dbTasks: SchedTask[] = dbTasksRaw.map(t => ({
     id: t.id,
@@ -51,7 +66,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     offsetWeeks: (t as any).offsetWeeks ?? 0,
   }));
 
-  // 4) fetch people from DB and split into pools using flags; include exceptions
+  // fetch people from DB and split into pools using flags; include exceptions
   const peopleDb = await prisma.person.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
@@ -65,8 +80,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
       shame: 0,
       activeWeekly: p.activeWeekly,
       activeBiweekly: p.activeBiweekly,
-      // @ts-ignore: your scheduler Person should include exceptions: string[]
-      exceptions: p.exceptions ?? [],
+      exceptions: (p.exceptions as unknown as string[]) ?? [],
     }));
 
   const biweeklyPeople: SchedPerson[] = peopleDb
@@ -77,11 +91,14 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
       shame: 0,
       activeWeekly: p.activeWeekly,
       activeBiweekly: p.activeBiweekly,
-      // @ts-ignore
-      exceptions: p.exceptions ?? [],
+      exceptions: (p.exceptions as unknown as string[]) ?? [],
     }));
 
-  // 5) build slots with scheduler (which must skip people whose exceptions include the task slug)
+  // Shuffle the people pools
+  shuffle(weeklyPeople);
+  shuffle(biweeklyPeople);
+
+  // build slots with scheduler
   const slots = buildPlan({
     startsOn: start,
     weeks: WEEK_COUNT,
@@ -90,7 +107,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     tasks: dbTasks,
   });
 
-  // 6) create new DRAFT plan + assignments
+  // create new DRAFT plan + assignments
   const plan = await prisma.plan.create({ data: { startsOn: start, weeks: WEEK_COUNT, status: "draft" } });
 
   for (const s of slots) {
