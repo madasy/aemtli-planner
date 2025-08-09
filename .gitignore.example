@@ -1,5 +1,7 @@
 # Node dependencies
 node_modules/
+node_modules_cache/
+web/app/node_modules/
 
 # Build output
 dist/

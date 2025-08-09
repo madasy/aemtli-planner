@@ -1,5 +1,11 @@
 # Node dependencies
 node_modules/
+node_modules/
+.next/
+dist/
+build/
+out/
+web/app/node_modules/
 
 # Build output
 dist/
