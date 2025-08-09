@@ -52,7 +52,6 @@ export default function Plan() {
   const biweekly = (tasks as Task[]).filter((t) => t.cadence === 'biweekly');
 
   function monday(week: number): Date {
-    // Only call this when start is non-null; guard at call sites
     const d = new Date(start as Date);
     d.setDate(d.getDate() + week * 7);
     return d;
@@ -81,14 +80,15 @@ export default function Plan() {
     </thead>
   );
 
-  const Row = (t: Task, isBiweekly: boolean) => (
+  // Weekly row: unchanged
+  const WeeklyRow = (t: Task) => (
     <tr key={t.id}>
       <td className="cell-task">{t.title}</td>
       {Array.from({ length: 16 }, (_, week) => {
         const slot = (slots as Slot[]).find((s) => s.taskId === t.id && s.weekIndex === week);
         const personId = slot?.personId ?? null;
         const isEmpty = personId === null;
-        const cls = `cell ${isBiweekly ? 'cell-biweekly' : ''} ${isEmpty ? 'cell-off' : ''}`;
+        const cls = `cell ${isEmpty ? 'cell-off' : ''}`;
         return (
           <td key={week} className={cls}>
             {nameById(personId)}
@@ -98,6 +98,38 @@ export default function Plan() {
     </tr>
   );
 
+  // Bi-weekly row: merge 2-week ON/OFF blocks
+  const BiweeklyRow = (t: Task) => {
+    const cells: React.ReactNode[] = [];
+    for (let week = 0; week < 16; ) {
+      const a0 = (slots as Slot[]).find((s) => s.taskId === t.id && s.weekIndex === week) || null;
+      const a1 = week + 1 < 16 ? (slots as Slot[]).find((s) => s.taskId === t.id && s.weekIndex === week + 1) || null : null;
+
+      const p0 = a0?.personId ?? null;
+      const p1 = a1?.personId ?? null;
+
+      const same = p0 === p1; // merge when same personId (including both null)
+      const colSpan = same ? 2 : 1;
+
+      const cls = `cell cell-biweekly ${p0 == null ? 'cell-off' : ''}`;
+
+      cells.push(
+        <td key={`${t.id}-${week}`} className={cls} colSpan={colSpan}>
+          {nameById(p0)}
+        </td>
+      );
+
+      week += same ? 2 : 1;
+    }
+
+    return (
+      <tr key={t.id}>
+        <td className="cell-task">{t.title}</td>
+        {cells}
+      </tr>
+    );
+  };
+
   return (
     <div className="mt-2">
       <h1 className="table-title">Ämtliplan - Hacienda Jose</h1>
@@ -106,11 +138,11 @@ export default function Plan() {
         <table className="min-w-full border border-gray-400 text-sm table-sticky">
           {Header}
           <tbody>
-            {weekly.map((t) => Row(t, false))}
+            {weekly.map((t) => WeeklyRow(t))}
             <tr>
               <td colSpan={17} className="separator" />
             </tr>
-            {biweekly.map((t) => Row(t, true))}
+            {biweekly.map((t) => BiweeklyRow(t))}
           </tbody>
         </table>
       </div>
