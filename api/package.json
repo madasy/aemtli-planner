@@ -10,15 +10,26 @@
     "prisma:generate": "prisma generate --schema=../prisma/schema.prisma"
   },
   "dependencies": {
-    "express": "^4.19.2",
-    "cors": "^2.8.5",
-    "ics": "^3.7.6",
     "@prisma/client": "^5.15.0",
-    "date-fns": "^3.6.0"
+    "cors": "^2.8.5",
+    "date-fns": "^3.6.0",
+    "express": "^4.19.2",
+    "ics": "^3.7.6"
   },
   "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "prisma": "^5.15.0",
+    "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.4.0",
-    "prisma": "^5.15.0"
+    "typescript": "^5.9.2"
+  },
+  
+  "prisma": {
+    "seed": "node dist/seed.js"
+  },
+  "scripts": {
+    "build": "tsc"
   }
+
 }

@@ -1,12 +1,16 @@
 import Link from "next/link";
-import Plan from "./plan";
+import dynamic from "next/dynamic";
 
-export default async function Home() {
+// Plan is a client component; load it only on the homepage and skip SSR
+const Plan = dynamic(() => import("./plan"), { ssr: false });
+
+export default function Home() {
   return (
     <main className="p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Ämtli – 16 Wochen Plan</h1>
-        <Link href="/admin" className="underline">Admin</Link>
+      <div className="flex items-center justify-end mb-4">
+        <Link href="/admin" className="underline">
+          Admin
+        </Link>
       </div>
       <Plan />
     </main>

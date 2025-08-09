@@ -1,0 +1,22 @@
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+
+/* sticky header + first column */
+.table-sticky thead th { position: sticky; top: 0; z-index: 20; background: white; }
+.table-sticky tbody td:first-child,
+.table-sticky thead th:first-child { position: sticky; left: 0; z-index: 30; background: white; }
+
+/* cells + borders */
+.cell { @apply border border-gray-300 px-3 py-2 text-center whitespace-nowrap; }
+.cell-task { @apply border border-gray-400 px-3 py-2 text-left font-medium bg-gray-50; }
+.separator { @apply border-y-2 border-gray-400; }
+
+/* coloring */
+.cell-biweekly { @apply bg-purple-50; }          /* all biweekly cells */
+.cell-off { @apply text-gray-500; }              /* off-week text */
+.table-title { @apply text-3xl font-extrabold mb-2; }
+.week-head { @apply text-sm font-semibold; }
