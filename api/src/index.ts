@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { prisma } from "./db.js";
-import { buildPlan, nextMonday, Task as SchedTask, Person as SchedPerson } from "./scheduler.js";
+import { buildPlan, Task as SchedTask, Person as SchedPerson } from "./scheduler.js";
 import { WEEK_COUNT, TASKS } from "./config.js";
 import { createEvents, EventAttributes } from "ics";
 
@@ -22,36 +22,58 @@ app.get("/", (_req: Request, res: Response) => res.send("Ämtli API OK"));
  *    honors person.exceptions (skip those tasks)
  */
 app.post("/api/plan/generate", async (req: Request, res: Response) => {
-  // 1) start date from request body or default to nextMonday
+  // ---- 1) start date (snap to Monday) ----
+function nextOrSameMonday(from = new Date()) {
+  const d = new Date(from);
+  const day = d.getDay(); // 0=Sun, 1=Mon, ... 6=Sat
+  const add = (8 - day) % 7; // Mon→0, Tue→6, Sun→1
+  d.setDate(d.getDate() + add);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
   let start: Date;
   if (req.body?.startDate) {
-    const parsed = new Date(req.body.startDate);
+    // expect YYYY-MM-DD; normalize and snap to Monday
+    const parsed = new Date(`${req.body.startDate}T00:00:00`);
     if (isNaN(parsed.getTime())) {
-      return res.status(400).json({ error: "Invalid startDate" });
+      return res.status(400).json({ error: "Invalid startDate (use YYYY-MM-DD)" });
     }
-    start = parsed;
+    start = parsed.getDay() === 1 ? parsed : nextOrSameMonday(parsed);
   } else {
-    start = nextMonday();
+    start = nextOrSameMonday();
   }
 
-  // 2) ensure tasks exist/updated (incl. offsetWeeks)
+  // ---- 2) ensure tasks exist/updated (incl. offsetWeeks) ----
   for (const t of TASKS) {
     await prisma.task.upsert({
       where: { slug: t.slug },
-      update: { title: t.title, cadence: t.cadence, offsetWeeks: t.offsetWeeks ?? 0 },
-      create: { slug: t.slug, title: t.title, cadence: t.cadence, offsetWeeks: t.offsetWeeks ?? 0 },
+      update: {
+        title: t.title,
+        cadence: t.cadence,
+        offsetWeeks: t.offsetWeeks ?? 0,
+      },
+      create: {
+        slug: t.slug,
+        title: t.title,
+        cadence: t.cadence,
+        offsetWeeks: t.offsetWeeks ?? 0,
+      },
     });
   }
 
-  // 3) remove old DRAFT(s) and their assignments
-  const drafts = await prisma.plan.findMany({ where: { status: "draft" }, select: { id: true } });
+  // ---- 3) remove old DRAFT(s) and their assignments ----
+  const drafts = await prisma.plan.findMany({
+    where: { status: "draft" },
+    select: { id: true },
+  });
   if (drafts.length) {
     const draftIds = drafts.map(d => d.id);
     await prisma.assignment.deleteMany({ where: { planId: { in: draftIds } } });
     await prisma.plan.deleteMany({ where: { id: { in: draftIds } } });
   }
 
-  // 4) fetch tasks for scheduler
+  // ---- 4) fetch tasks for scheduler ----
   const dbTasksRaw = await prisma.task.findMany({ orderBy: { id: "asc" } });
   const dbTasks: SchedTask[] = dbTasksRaw.map(t => ({
     id: t.id,
@@ -61,34 +83,38 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
     offsetWeeks: (t as any).offsetWeeks ?? 0,
   }));
 
-  // 5) fetch people and build pools
+  // ---- 5) fetch people and build shuffled pools (flags respected) ----
   const peopleDb = await prisma.person.findMany({
     orderBy: { name: "asc" },
-    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+    select: {
+      id: true,
+      name: true,
+      activeWeekly: true,
+      activeBiweekly: true,
+      exceptions: true,
+    },
   });
 
-  function shuffle<T>(arr: T[]): T[] {
-    return [...arr].sort(() => Math.random() - 0.5);
-  }
+  const shuffle = <T,>(arr: T[]) => [...arr].sort(() => Math.random() - 0.5);
 
-  const weeklyPeople: SchedPerson[] = shuffle(
+  const weeklyPeople = shuffle(
     peopleDb
       .filter(p => p.activeWeekly)
-      .map(p => ({
+      .map<SchedPerson>(p => ({
         id: p.id,
         name: p.name,
         shame: 0,
         activeWeekly: p.activeWeekly,
         activeBiweekly: p.activeBiweekly,
-        // @ts-ignore
+        // @ts-ignore scheduler Person supports exceptions: string[]
         exceptions: p.exceptions ?? [],
       }))
   );
 
-  const biweeklyPeople: SchedPerson[] = shuffle(
+  const biweeklyPeople = shuffle(
     peopleDb
       .filter(p => p.activeBiweekly)
-      .map(p => ({
+      .map<SchedPerson>(p => ({
         id: p.id,
         name: p.name,
         shame: 0,
@@ -99,7 +125,7 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
       }))
   );
 
-  // 6) build slots
+  // ---- 6) build slots with scheduler ----
   const slots = buildPlan({
     startsOn: start,
     weeks: WEEK_COUNT,
@@ -108,20 +134,30 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
     tasks: dbTasks,
   });
 
-  // 7) create plan + assignments
+  // Optional safety: ensure we don't have duplicate (taskId, weekIndex) in the same plan batch
+  const seen = new Set<string>();
+  const deduped = slots.filter(s => {
+    const k = `${s.taskId}:${s.weekIndex}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  // ---- 7) create plan + assignments (bulk) ----
   const plan = await prisma.plan.create({
     data: { startsOn: start, weeks: WEEK_COUNT, status: "draft" },
   });
 
-  for (const s of slots) {
-    await prisma.assignment.create({
-      data: {
+  if (deduped.length) {
+    await prisma.assignment.createMany({
+      data: deduped.map(s => ({
         planId: plan.id,
         taskId: s.taskId,
         weekIndex: s.weekIndex,
         personId: s.personId ?? null,
         autoGenerated: true,
-      },
+      })),
+      skipDuplicates: true, // extra guard against unique constraint
     });
   }
 
@@ -129,13 +165,18 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
 });
 
 
+
 /**
  * Publish latest draft by id
  */
-app.post("/api/plan/:id/publish", async (req: Request, res: Response) => {
+app.post("/api/plan/:id/publish", async (req, res) => {
   const { id } = req.params;
-  await prisma.plan.update({ where: { id }, data: { status: "published" } });
-  res.json({ ok: true });
+
+  // Option 1: demote all others to 'archived' so there is only one published
+  await prisma.plan.updateMany({ where: { status: "published", NOT: { id } }, data: { status: "archived" } });
+
+  const plan = await prisma.plan.update({ where: { id }, data: { status: "published" } });
+  res.json({ ok: true, plan });
 });
 
 /**
