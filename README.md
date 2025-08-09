@@ -37,7 +37,12 @@ cd ..
 npm i -g prisma
 prisma migrate dev --schema=./prisma/schema.prisma
 
-# 4) API & Web starten (in getrennten Terminals)
+# 4) DB migrieren when schema.prisma angepasst wurde
+cd api
+npx prisma migrate dev --name add_person_exceptions
+npx prisma generate
+
+# 5) API & Web starten (in getrennten Terminals)
 cd api && npm run dev
 # neues Terminal
 cd web && npm run dev

@@ -1,8 +1,8 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import { prisma } from "./db.js";
-import { buildPlan, nextMonday, Task as SchedTask } from "./scheduler.js";
-import { WEEK_COUNT, PEOPLE_WEEKLY, PEOPLE_BIWEEKLY, TASKS } from "./config.js";
+import { buildPlan, nextMonday, Task as SchedTask, Person as SchedPerson } from "./scheduler.js";
+import { WEEK_COUNT, TASKS } from "./config.js";
 import { createEvents, EventAttributes } from "ics";
 
 const app = express();
@@ -14,11 +14,17 @@ app.get("/", (_req: Request, res: Response) => res.send("Ämtli API OK"));
 
 /**
  * Generate a DRAFT plan in DB with assignments (has IDs)
+ * - Deletes any existing drafts (and their assignments) first
+ * - Seeds/updates tasks from config (incl. offsetWeeks)
+ * - Uses people from DB:
+ *    weekly = activeWeekly === true
+ *    biweekly = activeBiweekly === true
+ *    honors person.exceptions (skip those tasks)
  */
 app.post("/api/plan/generate", async (_req: Request, res: Response) => {
   const start = nextMonday();
 
-  // Ensure tasks exist (including offsetWeeks)
+  // 1) ensure tasks exist/updated (incl. offsetWeeks)
   for (const t of TASKS) {
     await prisma.task.upsert({
       where: { slug: t.slug },
@@ -27,25 +33,55 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     });
   }
 
-  // Ensure people exist (both pools)
-  for (const name of [...PEOPLE_WEEKLY, ...PEOPLE_BIWEEKLY]) {
-    await prisma.person.upsert({ where: { name }, update: {}, create: { name } });
+  // 2) remove old DRAFT(s) and their assignments (as requested)
+  const drafts = await prisma.plan.findMany({ where: { status: "draft" }, select: { id: true } });
+  if (drafts.length) {
+    const draftIds = drafts.map(d => d.id);
+    await prisma.assignment.deleteMany({ where: { planId: { in: draftIds } } });
+    await prisma.plan.deleteMany({ where: { id: { in: draftIds } } });
   }
 
-  // Fetch tasks from DB and map to scheduler type (typed, no `any`)
+  // 3) fetch tasks for scheduler
   const dbTasksRaw = await prisma.task.findMany({ orderBy: { id: "asc" } });
   const dbTasks: SchedTask[] = dbTasksRaw.map(t => ({
     id: t.id,
     slug: t.slug,
     title: t.title,
     cadence: (t.cadence === "biweekly" ? "biweekly" : "weekly"),
-    offsetWeeks: (t as any).offsetWeeks ?? 0, // Prisma type might not include it in your client; cast defensively
+    offsetWeeks: (t as any).offsetWeeks ?? 0,
   }));
 
-  // Temporary generator people (IDs local to the generator, mapped by name later)
-  const weeklyPeople   = PEOPLE_WEEKLY.map((name, i) => ({ id: i + 1,    name, shame: 0, activeWeekly: true,  activeBiweekly: false }));
-  const biweeklyPeople = PEOPLE_BIWEEKLY.map((name, i) => ({ id: i + 101, name, shame: 0, activeWeekly: false, activeBiweekly: true }));
+  // 4) fetch people from DB and split into pools using flags; include exceptions
+  const peopleDb = await prisma.person.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+  });
 
+  const weeklyPeople: SchedPerson[] = peopleDb
+    .filter(p => p.activeWeekly)
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      shame: 0,
+      activeWeekly: p.activeWeekly,
+      activeBiweekly: p.activeBiweekly,
+      // @ts-ignore: your scheduler Person should include exceptions: string[]
+      exceptions: p.exceptions ?? [],
+    }));
+
+  const biweeklyPeople: SchedPerson[] = peopleDb
+    .filter(p => p.activeBiweekly)
+    .map(p => ({
+      id: p.id,
+      name: p.name,
+      shame: 0,
+      activeWeekly: p.activeWeekly,
+      activeBiweekly: p.activeBiweekly,
+      // @ts-ignore
+      exceptions: p.exceptions ?? [],
+    }));
+
+  // 5) build slots with scheduler (which must skip people whose exceptions include the task slug)
   const slots = buildPlan({
     startsOn: start,
     weeks: WEEK_COUNT,
@@ -54,16 +90,8 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
     tasks: dbTasks,
   });
 
+  // 6) create new DRAFT plan + assignments
   const plan = await prisma.plan.create({ data: { startsOn: start, weeks: WEEK_COUNT, status: "draft" } });
-
-  // Map generator person names to DB person IDs
-  const peopleDb = await prisma.person.findMany();
-  const nameToId = new Map<string, number>(peopleDb.map(p => [p.name, p.id]));
-  function mapPerson(genId: number | null): number | null {
-    if (genId == null) return null;
-    const p = [...weeklyPeople, ...biweeklyPeople].find(x => x.id === genId);
-    return p ? (nameToId.get(p.name) ?? null) : null;
-  }
 
   for (const s of slots) {
     await prisma.assignment.create({
@@ -71,7 +99,7 @@ app.post("/api/plan/generate", async (_req: Request, res: Response) => {
         planId: plan.id,
         taskId: s.taskId,
         weekIndex: s.weekIndex,
-        personId: mapPerson(s.personId),
+        personId: s.personId ?? null,
         autoGenerated: true,
       },
     });
@@ -132,17 +160,17 @@ app.get("/api/admin/plan", async (_req: Request, res: Response) => {
 
   res.json({ plan, tasks, assignments, people });
 });
+
 /**
- * Debug Route: List all plans
+ * Debug Route: List all routes
  */
-app.get('/__routes', (_req, res) => {
+app.get("/__routes", (_req, res) => {
   // @ts-ignore
   const routes = app._router.stack
     .filter((r: any) => r.route && r.route.path)
     .map((r: any) => ({ method: Object.keys(r.route.methods)[0].toUpperCase(), path: r.route.path }));
   res.json(routes);
 });
-
 
 /**
  * Update one assignment (drag & drop)
@@ -155,20 +183,58 @@ app.patch("/api/assignment/:id", async (req: Request, res: Response) => {
 });
 
 /**
- * People list for admin sidebar
+ * People CRUD + flags + exceptions
  */
-// People list (with pool flags)
-app.get("/api/people", async (_req: Request, res: Response) => {
-  const peopleDb = await prisma.person.findMany({ orderBy: { name: "asc" } });
-  const resp = peopleDb.map(p => ({
-    id: p.id,
-    name: p.name,
-    activeWeekly:   PEOPLE_WEEKLY.includes(p.name),
-    activeBiweekly: PEOPLE_BIWEEKLY.includes(p.name),
-  }));
-  res.json(resp);
+app.get("/api/people", async (_req, res) => {
+  const people = await prisma.person.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+  });
+  res.json(people);
 });
 
+app.post("/api/people", async (req, res) => {
+  const { name } = req.body ?? {};
+  if (!name || typeof name !== "string") return res.status(400).json({ error: "name required" });
+  const person = await prisma.person.create({
+    data: { name, activeWeekly: false, activeBiweekly: false, exceptions: [] },
+    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+  });
+  res.status(201).json(person);
+});
+
+app.patch("/api/people/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  const { name, activeWeekly, activeBiweekly } = req.body ?? {};
+  const person = await prisma.person.update({
+    where: { id },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(activeWeekly !== undefined ? { activeWeekly } : {}),
+      ...(activeBiweekly !== undefined ? { activeBiweekly } : {}),
+    },
+    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+  });
+  res.json(person);
+});
+
+app.patch("/api/people/:id/exceptions", async (req, res) => {
+  const id = Number(req.params.id);
+  const { exceptions } = req.body as { exceptions: string[] };
+  const person = await prisma.person.update({
+    where: { id },
+    data: { exceptions: exceptions ?? [] },
+    select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true },
+  });
+  res.json(person);
+});
+
+app.delete("/api/people/:id", async (req, res) => {
+  const id = Number(req.params.id);
+  await prisma.assignment.updateMany({ where: { personId: id }, data: { personId: null } });
+  await prisma.person.delete({ where: { id } });
+  res.json({ ok: true });
+});
 
 /**
  * ICS for a given person from the latest PUBLISHED plan

@@ -13,6 +13,7 @@ model Person {
   activeWeekly   Boolean      @default(true)
   activeBiweekly Boolean      @default(true)
   shameCount     Int          @default(0)
+  exceptions     String[]     @default([])
   assignments    Assignment[]
   createdAt      DateTime     @default(now())
 }
