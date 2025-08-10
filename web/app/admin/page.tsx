@@ -74,6 +74,27 @@ export default function AdminPage() {
   const [vacationStartWeek, setVacationStartWeek] = useState<number | null>(null);
   const [vacationEndWeek, setVacationEndWeek] = useState<number | null>(null);
 
+  // New state to hold existing vacation entries for the selected person
+  const [currentPersonUnavailable, setCurrentPersonUnavailable] = useState<{ from: string; to: string; }[]>([]);
+
+  // Fetch vacation entries when a person is selected
+  useEffect(() => {
+    async function fetchUnavailable() {
+      if (vacationPersonId === null) {
+        setCurrentPersonUnavailable([]);
+        return;
+      }
+      try {
+        const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+        setCurrentPersonUnavailable(response.data);
+      } catch (error) {
+        console.error("Failed to fetch vacation entries:", error);
+        setCurrentPersonUnavailable([]);
+      }
+    }
+    fetchUnavailable();
+  }, [vacationPersonId, api]);
+
   async function load() {
     setLoading(true);
     try {
@@ -193,13 +214,41 @@ export default function AdminPage() {
     end.setDate(end.getDate() + (vacationEndWeek * 7) + 6); // end of the week
 
     try {
-      const cur = (await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`)).data as any[];
+      // Fetch current unavailable list
+      const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+      const cur = response.data as any[];
+
+      // Add new vacation
       cur.push({ from: iso(start), to: iso(end) });
+
+      // Update on server
       await axios.patch(`${api}/api/people/${vacationPersonId}/unavailable`, { unavailable: cur });
-      setVacationPickerOpen(false);
-      await load();
+      
+      // Update local state immediately for display
+      setCurrentPersonUnavailable(cur); 
+      
+      // Reload main app data (optional, but good for consistency across app)
+      await load(); 
+
     } catch (error) {
       console.error("Failed to add vacation:", error);
+    }
+  }
+  
+  async function handleDeleteVacation(from: string, to: string) {
+    if (!vacationPersonId || !confirm("Urlaubseintrag wirklich löschen?")) return;
+    try {
+      const updatedUnavailable = currentPersonUnavailable.filter(
+        (v) => !(v.from === from && v.to === to)
+      );
+      await axios.patch(`${api}/api/people/${vacationPersonId}/unavailable`, { unavailable: updatedUnavailable });
+      setCurrentPersonUnavailable(updatedUnavailable); // optimistic UI update
+      await load(); // re-sync main state
+    } catch (error) {
+      console.error("Failed to delete vacation:", error);
+      // Re-fetch in case of error to revert the UI
+      const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+      setCurrentPersonUnavailable(response.data);
     }
   }
 
@@ -421,7 +470,16 @@ export default function AdminPage() {
 
           <button
             className="border rounded px-3 py-1 relative"
-            onClick={() => setVacationPickerOpen(!vacationPickerOpen)}
+            onClick={() => {
+              setVacationPickerOpen(!vacationPickerOpen);
+              // reset states when closing
+              if (vacationPickerOpen) {
+                setVacationPersonId(null);
+                setVacationStartWeek(null);
+                setVacationEndWeek(null);
+                setCurrentPersonUnavailable([]);
+              }
+            }}
           >
             Urlaub
           </button>
@@ -492,12 +550,41 @@ export default function AdminPage() {
                 </select>
               </label>
             </div>
+
+            <hr className="my-4" />
+            
+            <h4 className="text-base font-semibold mb-2">Bestehende Einträge</h4>
+            {vacationPersonId !== null ? (
+              currentPersonUnavailable.length > 0 ? (
+                <ul className="max-h-40 overflow-y-auto border rounded p-2">
+                  {currentPersonUnavailable.map((v, index) => (
+                    <li key={index} className="flex justify-between items-center text-sm py-1 border-b last:border-b-0">
+                      <span>
+                        {new Intl.DateTimeFormat('de-CH').format(new Date(v.from))} – {new Intl.DateTimeFormat('de-CH').format(new Date(v.to))}
+                      </span>
+                      <button
+                        className="text-red-600 hover:text-red-800"
+                        onClick={() => handleDeleteVacation(v.from, v.to)}
+                        title="Eintrag löschen"
+                      >
+                        ✕
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-sm text-gray-500">Keine Urlaubseinträge vorhanden.</p>
+              )
+            ) : (
+              <p className="text-sm text-gray-500">Bitte eine Person auswählen, um die Einträge zu sehen.</p>
+            )}
+
             <div className="flex justify-end gap-2 mt-4">
               <button
                 className="border rounded px-3 py-1"
                 onClick={() => setVacationPickerOpen(false)}
               >
-                Abbrechen
+                Schliessen
               </button>
               <button
                 className="bg-blue-500 text-white rounded px-3 py-1"
