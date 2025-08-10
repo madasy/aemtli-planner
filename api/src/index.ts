@@ -4,6 +4,7 @@ import { prisma } from "./db.js";
 import { buildPlan, Task as SchedTask, Person as SchedPerson } from "./scheduler.js";
 import { WEEK_COUNT, TASKS } from "./config.js";
 import { createEvents, EventAttributes } from "ics";
+import { renderPlanPdf } from "./pdf.js";
 
 const app = express();
 app.use(cors());
@@ -149,6 +150,19 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
   }
 
   res.json({ planId: plan.id });
+});
+
+/**
+ * Generate PDF of the current plan
+ */
+
+app.get("/api/plan/pdf", async (_req, res) => {
+  try {
+    await renderPlanPdf(res);
+  } catch (e:any) {
+    console.error(e);
+    res.status(500).send("PDF failed");
+  }
 });
 
 /**
