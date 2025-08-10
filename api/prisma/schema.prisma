@@ -8,15 +8,17 @@ datasource db {
 }
 
 model Person {
-  id             Int          @id @default(autoincrement())
-  name           String       @unique
-  activeWeekly   Boolean      @default(true)
-  activeBiweekly Boolean      @default(true)
-  shameCount     Int          @default(0)
-  exceptions     String[]     @default([])
+  id             Int       @id @default(autoincrement())
+  name           String    @unique
+  activeWeekly   Boolean   @default(true)
+  activeBiweekly Boolean   @default(true)
+  shameCount     Int       @default(0)
+  exceptions     String[]  @default([])
+  unavailable    Json?     // [{from: "YYYY-MM-DD", to: "YYYY-MM-DD"}, ...]
   assignments    Assignment[]
-  createdAt      DateTime     @default(now())
+  createdAt      DateTime  @default(now())
 }
+
 
 model Task {
   id          Int          @id @default(autoincrement())
@@ -51,4 +53,19 @@ model Assignment {
   person Person? @relation(fields: [personId], references: [id])
 
   @@unique([planId, taskId, weekIndex])
+}
+
+enum DutyKind {
+  FIXED   // Feste Ämtli
+  HONOR   // Ehren Ämtli
+}
+
+model Duty {
+  id         Int       @id @default(autoincrement())
+  kind       DutyKind
+  label      String
+  assignees  String    // free text: "Sven,tbd,tbd"
+  order      Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
