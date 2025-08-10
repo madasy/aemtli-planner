@@ -168,12 +168,25 @@ app.get("/api/plan/pdf", async (_req, res) => {
 /**
  * Publish latest draft by id
  */
+// Publish latest draft by id (archive all other published)
 app.post("/api/plan/:id/publish", async (req: Request, res: Response) => {
   const { id } = req.params;
-  const plan = await prisma.plan.update({ where: { id }, data: { status: "published" } });
+
+  const [_, plan] = await prisma.$transaction([
+    prisma.plan.updateMany({
+      where: { status: "published", NOT: { id } },
+      data: { status: "archived" }, // make sure your Plan.status is a string; 'archived' is fine
+    }),
+    prisma.plan.update({
+      where: { id },
+      data: { status: "published" },
+    }),
+  ]);
+
   res.setHeader("Cache-Control", "no-store");
   res.json({ ok: true, plan });
 });
+
 
 /**
  * Public current plan (PUBLISHED only)
@@ -320,32 +333,64 @@ app.patch("/api/people/:id/unavailable", async (req, res) => {
  */
 app.get("/api/ics/:personId", async (req: Request, res: Response) => {
   const personId = Number(req.params.personId);
+
+  // 1. Fetch person details to get their name for the filename
+  const person = await prisma.person.findUnique({ where: { id: personId }, select: { name: true } });
+  if (!person) {
+    return res.status(404).send("Person not found");
+  }
+
   const plan = await prisma.plan.findFirst({ where: { status: "published" }, orderBy: { startsOn: "desc" } });
-  if (!plan) return res.status(404).send("No plan");
+  if (!plan) {
+    return res.status(404).send("No plan");
+  }
 
   const tasks = await prisma.task.findMany({ orderBy: { id: "asc" } });
   const slots = await prisma.assignment.findMany({ where: { planId: plan.id, personId } });
 
-  const startTime = process.env.ICS_START_TIME || "18:00";
-  const [hh, mm] = startTime.split(":").map(x => parseInt(x, 10));
+  // startTime (hh, mm) is no longer needed for full-day events, removed its usage below.
+  // const startTime = process.env.ICS_START_TIME || "18:00";
+  // const [hh, mm] = startTime.split(":").map(x => parseInt(x, 10));
 
   const events: EventAttributes[] = slots.map(s => {
     const monday = new Date(plan.startsOn);
     monday.setDate(monday.getDate() + 7 * s.weekIndex);
+
+    // 2. Calculate end date for a full-day event:
+    // For a task covering Monday to Sunday of a given week,
+    // the ICS DTEND for an all-day event should be the *next* Monday.
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7); // Add 7 days to get to the next Monday
+
     const task = tasks.find(t => t.id === s.taskId)!;
+    
     return {
       uid: `assign-${s.taskId}-${s.weekIndex}-${personId}@aemtli`,
       title: `Ämtli – ${task.title}`,
-      start: [monday.getFullYear(), monday.getMonth() + 1, monday.getDate(), hh, mm || 0] as [number, number, number, number, number],
-      end:   [monday.getFullYear(), monday.getMonth() + 1, monday.getDate(), (hh + 1) % 24, mm || 0] as [number, number, number, number, number],
+      // Full-day event: only year, month, and day components for start and end
+      start: [monday.getFullYear(), monday.getMonth() + 1, monday.getDate()],
+      end:   [nextMonday.getFullYear(), nextMonday.getMonth() + 1, nextMonday.getDate()],
       description: `Woche ${s.weekIndex + 1} von 16`,
+      // 3. Mark as "Free" using transp property
+      transp: 'TRANSPARENT', // Indicates free time
+      // Optional: Add a calendar name for better organization in some calendar apps
+      calName: 'Ämtliplan - Hacienda Jose',
     };
   });
 
   const { error, value } = createEvents(events);
-  if (error) return res.status(500).send(String(error));
+  if (error) {
+    console.error("Error creating ICS events:", error);
+    return res.status(500).send(String(error));
+  }
+
+  // Generate new filename: personId-personname-aemtli.ics
+  // Sanitize the person's name for safe use in a filename
+  const personNameCleaned = person.name.replace(/[^a-zA-Z0-9\s-]/g, '').replace(/\s+/g, '-').toLowerCase();
+  const filename = `${personId}-${personNameCleaned}-aemtli.ics`;
+
   res.setHeader("Content-Type", "text/calendar; charset=utf-8");
-  res.setHeader("Content-Disposition", `attachment; filename="user-${personId}-aemtli.ics"`);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
   res.send(value);
 });
 
