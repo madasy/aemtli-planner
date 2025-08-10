@@ -252,6 +252,15 @@ export default function AdminPage() {
     }
   }
 
+  //Edit as Draft
+const isPublished = plan?.status === "published";
+
+async function editAsDraft() {
+  if (!plan?.id) return;
+  await axios.post(`${api}/api/plan/${plan.id}/clone-to-draft`);
+  await load(); // after this, /api/admin/plan will return the new draft
+}
+
   function mondayLabel(week: number) {
     if (!plan?.startsOn) return '??.??';
     const start = new Date(plan.startsOn);
@@ -491,10 +500,15 @@ export default function AdminPage() {
           >
             Ausnahmen
           </button>
-
-          <button className="border rounded px-3 py-1" onClick={publish} disabled={busy || !plan?.id}>
-            {busy ? "Publiziere…" : "Publish"}
-          </button>
+            {isPublished ? (
+              <button className="border rounded px-3 py-1" onClick={editAsDraft}>
+                Edit as Draft
+              </button>
+            ) : (
+              <button className="border rounded px-3 py-1" onClick={publish} disabled={busy || !plan?.id}>
+                {busy ? "Publiziere…" : "Publish"}
+              </button>
+            )}
         </div>
       </div>
 
@@ -672,7 +686,7 @@ export default function AdminPage() {
                       const a = cell(t.id, week);
                       const label = a ? personName(a.personId) : '—';
                       return (
-                        <Droppable key={week} droppableId={`cell:${a?.id ?? -1}:weekly`}>
+                        <Droppable key={week} droppableId={`cell:${a?.id ?? -1}:weekly`} isDropDisabled={isPublished}>
                           {provided => (
                             <td ref={provided.innerRef} {...provided.droppableProps} className={`cell ${a?.personId == null ? 'cell-off' : ''}`}>
                               {a?.personId != null ? (
@@ -709,7 +723,7 @@ export default function AdminPage() {
                         if (canMerge) {
                           const label = personName(a0!.personId);
                           tds.push(
-                            <Droppable key={`pair-${week}`} droppableId={`pair:${a0!.id}:${a1!.id}`}>
+                            <Droppable key={`pair-${week}`} droppableId={`pair:${a0!.id}:${a1!.id}`} isDropDisabled={isPublished}>
                               {provided => (
                                 <td ref={provided.innerRef} {...provided.droppableProps} colSpan={2} className="cell cell-biweekly">
                                   <Draggable draggableId={`assign-${a0!.id}`} index={0}>
@@ -728,7 +742,7 @@ export default function AdminPage() {
                         } else {
                           const label = a0 ? personName(a0.personId) : '—';
                           tds.push(
-                            <Droppable key={week} droppableId={`cell:${a0?.id ?? -1}:biweekly`}>
+                            <Droppable key={week} droppableId={`cell:${a0?.id ?? -1}:biweekly`} isDropDisabled={isPublished || a0?.personId == null}>
                               {provided => (
                                 <td ref={provided.innerRef} {...provided.droppableProps} className={`cell cell-biweekly ${a0?.personId == null ? 'cell-off' : ''}`}>
                                   {a0?.personId != null ? (

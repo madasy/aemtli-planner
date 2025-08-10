@@ -5,6 +5,7 @@ import { prisma } from "./db.js";
 // Tailwind-ish colors
 const PURPLE_50 = "#FAF5FF";
 const GRAY_50   = "#F9FAFB";
+const GRAY_100  = "#c9c9c9";
 const GRAY_300  = "#D1D5DB";
 const GRAY_400  = "#9CA3AF";
 const BLACK     = "#000000";
@@ -27,7 +28,7 @@ const THEME: Theme = {
   emptyFg: "#6B7280", // gray-500-ish
 };
 
-// draw single-line or wrap (center vertically within a box)
+// draw text inside a box (wrap allowed) and vertically center it
 function drawTextInBox(
   doc: PDFKit.PDFDocument,
   text: string,
@@ -46,7 +47,7 @@ function drawTextInBox(
   doc.text(text, x, yCentered, { width: w, height: h, align, lineBreak });
 }
 
-// fit text to width by reducing font size (down to minFs)
+// shrink font-size down to minFs so text fits targetWidth
 function fitTextToWidth(
   doc: PDFKit.PDFDocument,
   text: string,
@@ -56,21 +57,16 @@ function fitTextToWidth(
 ) {
   const prev = (doc as any)._fontSize ?? startFs;
   let fs = startFs;
-
   while (fs > minFs) {
     doc.fontSize(fs);
-    const w = doc.widthOfString(text); // no { size: fs } — size is taken from doc
+    const w = doc.widthOfString(text);
     if (w <= targetWidth) break;
     fs -= 0.5;
   }
-
-  // restore to previous so callers explicitly set what they need next
   doc.fontSize(prev);
   return fs;
 }
 
-
-// clamp helper
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 export async function renderPlanPdf(res: Response) {
@@ -102,7 +98,7 @@ export async function renderPlanPdf(res: Response) {
     return new Intl.DateTimeFormat("de-CH", { day:"2-digit", month:"2-digit" }).format(d);
   };
 
-  // PDF
+  // PDF doc
   const doc = new PDFDocument({
     size: "A4",
     layout: "landscape",
@@ -112,22 +108,27 @@ export async function renderPlanPdf(res: Response) {
   res.setHeader("Content-Disposition", `inline; filename="aemtli-plan.pdf"`);
   doc.pipe(res);
 
-  // Metrics (initial)
+  // Metrics
   const left    = doc.page.margins.left;
   const top     = doc.page.margins.top;
   const usableW = doc.page.width  - doc.page.margins.left - doc.page.margins.right;
+  const usableH = doc.page.height - doc.page.margins.top  - doc.page.margins.bottom;
 
-  const WEEKS       = 16;
-  const HEADER_H    = 26;
-  const ROW_H       = 22;
-  const TASKCOL_MIN = 95;   // how far we can shrink the task column
-  const CELL_MIN_W  = 34;   // minimum week cell width
-  const CELL_PAD    = 12;   // text padding inside cell
-  const BASE_CELL_FS= 9;    // starting font size for cells
-  const MIN_CELL_FS = 8;    // min font size to keep single line names
+  const WEEKS         = 16;
+  const HEADER_H      = 28;     // a bit taller for air
+  const ROW_H         = 26;     // table row height (more air)
+  const DUTY_ROW_H    = 18;     // smaller duty rows
+  const TASKCOL_MIN   = 95;
+  const CELL_MIN_W    = 34;
+  const CELL_PAD      = 12;
+  const BASE_CELL_FS  = 9;
+  const MIN_CELL_FS   = 8;
+  const TITLE_FS      = 14;
+  const HEADER_FS     = 9;
+  const DUTY_HEAD_FS  = 11;
+  const DUTY_TEXT_FS  = 8;
 
-  // --- auto-fit week cell width so the longest name fits on one line if possible ---
-  // 1) compute the longest person name (non-empty only)
+  // longest assigned name (for single-line fit)
   let longestName = "";
   for (const a of assignments) {
     if (a.personId != null) {
@@ -135,25 +136,21 @@ export async function renderPlanPdf(res: Response) {
       if (n.length > longestName.length) longestName = n;
     }
   }
-  // Fallback if all empty
-  if (!longestName) longestName = "Johanna"; // typical worst-case among your names
+  if (!longestName) longestName = "Johanna";
 
-  // 2) iterate to find a layout that fits: adjust taskColW down, then font-size down
+  // Auto-fit: reduce task column then font
   let taskColW = 130;
   let cellW    = (usableW - taskColW) / WEEKS;
   let cellFs   = BASE_CELL_FS;
 
-// helper to check if current (cellW, cellFs) fits longest name
-const fitsLongest = () => {
-  const prev = (doc as any)._fontSize ?? cellFs;
-  doc.fontSize(cellFs);
-  const ok = doc.widthOfString(longestName) <= (cellW - CELL_PAD);
-  doc.fontSize(prev);
-  return ok;
-};
+  const fitsLongest = () => {
+    const prev = (doc as any)._fontSize ?? cellFs;
+    doc.fontSize(cellFs);
+    const ok = doc.widthOfString(longestName) <= (cellW - CELL_PAD);
+    doc.fontSize(prev);
+    return ok;
+  };
 
-
-  // tighten task column first
   while (!fitsLongest() && taskColW > TASKCOL_MIN) {
     const nextTaskW = Math.max(TASKCOL_MIN, taskColW - 5);
     const nextCellW = (usableW - nextTaskW) / WEEKS;
@@ -161,76 +158,65 @@ const fitsLongest = () => {
     taskColW = nextTaskW;
     cellW    = nextCellW;
   }
-  // then reduce font size if still needed
-  while (!fitsLongest() && cellFs > MIN_CELL_FS) {
-    cellFs -= 0.5;
-  }
-  // never less than minimum width
+  while (!fitsLongest() && cellFs > MIN_CELL_FS) cellFs -= 0.5;
   if (cellW < CELL_MIN_W) {
-    cellW  = CELL_MIN_W;
+    cellW    = CELL_MIN_W;
     taskColW = usableW - WEEKS * cellW;
   }
 
   // Title
-  doc.fontSize(14).fillColor(BLACK).text("ÄMTLIPLAN – HACIENDA JOSE", left, top);
-  let y = top + 16;
+  doc.fontSize(TITLE_FS).fillColor(BLACK).text("ÄMTLIPLAN – HACIENDA JOSE", left, top);
+  let y = top + 18;
 
-  // Header (first "Task" stays white; week headers purple)
-  doc.save();
-  // left header cell (Task) background white by default
+  // Header: left "Task" white; week headers purple
   doc.rect(left, y, taskColW, HEADER_H).strokeColor(THEME.primary).lineWidth(0.6).stroke();
-  drawTextInBox(doc, "Task", left + 7, y, taskColW - 14, HEADER_H, 9, THEME.headerFg, "left");
+  drawTextInBox(doc, "Task", left + 7, y, taskColW - 14, HEADER_H, HEADER_FS, THEME.headerFg, "left");
 
-  // week headers bg purple-50
+  doc.save();
   doc.rect(left + taskColW, y, cellW * WEEKS, HEADER_H).fill(THEME.headerBg);
   doc.restore();
 
-  // week header labels
   for (let w = 0; w < WEEKS; w++) {
     const x = left + taskColW + cellW * w;
-    drawTextInBox(doc, monday(w), x + 6, y, cellW - 12, HEADER_H, 9, THEME.headerFg, "left");
+    drawTextInBox(doc, monday(w), x + 6, y, cellW - 12, HEADER_H, HEADER_FS, THEME.headerFg, "left");
     doc.rect(x, y, cellW, HEADER_H).strokeColor(THEME.primary).lineWidth(0.6).stroke();
   }
   y += HEADER_H;
 
-  // --- rows: WEEKLY ---
+  // WEEKLY rows
   for (const t of weekly) {
-    // task title cell (bg purple-50)
+    // task cell bg purple
     doc.rect(left, y, taskColW, ROW_H).fillAndStroke(THEME.taskNameBg, THEME.primary);
-    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left");
+    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left", true);
 
-    // week cells
     for (let w = 0; w < WEEKS; w++) {
       const x   = left + taskColW + cellW * w;
       const a   = cellFor(t.id, w);
       const pid = a?.personId ?? null;
       const label = personName(pid);
 
-      // background only when empty
-      if (pid == null) {
+      if (pid == null) { // bg only when empty
         doc.save();
         doc.rect(x, y, cellW, ROW_H).fill(THEME.emptyBg);
         doc.restore();
       }
-      // border
       doc.rect(x, y, cellW, ROW_H).strokeColor(THEME.primary).lineWidth(0.4).stroke();
-      // text (left aligned)
+
       const fs = clamp(fitTextToWidth(doc, label, cellW - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
-      drawTextInBox(doc, label, x + 6, y, cellW - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "left");
+      drawTextInBox(doc, label || "", x + 6, y, cellW - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "left");
     }
     y += ROW_H;
   }
 
-  // separator line
-  y += 3;
+  // separator
+  y += 4;
   doc.moveTo(left, y).lineTo(left + taskColW + cellW * WEEKS, y).lineWidth(1).strokeColor(THEME.primary).stroke();
-  y += 5;
+  y += 6;
 
-  // --- rows: BIWEEKLY (merged cells), same color rules ---
+  // BIWEEKLY rows (merge contiguous equal assignee)
   for (const t of biweekly) {
-    // task title cell
     doc.rect(left, y, taskColW, ROW_H).fillAndStroke(THEME.taskNameBg, THEME.primary);
-    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left");
+    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left", true);
 
     let w = 0;
     while (w < WEEKS) {
@@ -243,52 +229,60 @@ const fitsLongest = () => {
       const pid = a0?.personId ?? null;
       const label = personName(pid);
 
-      // bg only when empty
       if (pid == null) {
         doc.save();
         doc.rect(x, y, cellW * span, ROW_H).fill(THEME.emptyBg);
         doc.restore();
       }
-      // border
       doc.rect(x, y, cellW * span, ROW_H).strokeColor(THEME.primary).lineWidth(0.4).stroke();
-      // centered text for bi-weekly cells
+
       const fs = clamp(fitTextToWidth(doc, label, cellW * span - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
-      drawTextInBox(doc, label, x + 6, y, cellW * span - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "center");
+      drawTextInBox(doc, label || "", x + 6, y, cellW * span - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "center");
 
       w += span;
     }
     y += ROW_H;
   }
 
-  // ---- Duties (Feste / Ehren) ----
-  y += 12;
+  // ---- Duties (Fixed / Honor) aligned to bottom ----
   const fixed = duties.filter((d:any)=>d.kind==='FIXED').sort((a:any,b:any)=>a.order-b.order);
   const honor = duties.filter((d:any)=>d.kind==='HONOR').sort((a:any,b:any)=>a.order-b.order);
 
   const gap    = 20;
-  const blockW = (taskColW + cellW * WEEKS - gap) / 2;
+  const tableWidth = taskColW + cellW * WEEKS;
+  const blockW = (tableWidth - gap) / 2;
   const leftX  = left;
   const rightX = left + blockW + gap;
 
+  // compute how much height we need for the duties and push to bottom
+  const headsH     = 14; // space for "Feste Ämtli"/"Ehren Ämtli" headings
+  const fixedH     = fixed.length * DUTY_ROW_H;
+  const honorH     = honor.length * DUTY_ROW_H;
+  const dutiesH    = Math.max(fixedH, honorH) + headsH;
+
+  const bottomY = top + usableH; // printable bottom
+  const dutyStartY = Math.max(y + 10, bottomY - dutiesH); // keep a little gap after table
+  y = dutyStartY;
+
   function drawDutyBlock(x: number, title: string, rows: any[]) {
-    doc.fillColor(BLACK).fontSize(11).text(title, x, y);
-    let ry = y + 14;
+    doc.fillColor(BLACK).fontSize(DUTY_HEAD_FS).text(title, x, y);
+    let ry = y + headsH;
     for (const d of rows) {
       const labelW     = blockW * 0.55;
       const assigneesW = blockW * 0.45;
 
       // label cell (bg gray-50, border gray-400, left)
       doc.save();
-      doc.rect(x, ry, labelW, ROW_H).fill(GRAY_50).strokeColor(GRAY_400).lineWidth(0.5).stroke();
+      doc.rect(x, ry, labelW, DUTY_ROW_H).fill(GRAY_100).strokeColor(GRAY_400).lineWidth(0.5).stroke();
       doc.restore();
-      drawTextInBox(doc, d.label || "", x + 8, ry, labelW - 16, ROW_H, 9, BLACK, "left");
+      drawTextInBox(doc, String(d.label || ""), x + 8, ry, labelW - 16, DUTY_ROW_H, DUTY_TEXT_FS, BLACK, "left");
 
       // assignees cell (center, border gray-300)
       const ax = x + labelW;
-      doc.rect(ax, ry, assigneesW, ROW_H).strokeColor(GRAY_300).lineWidth(0.5).stroke();
-      drawTextInBox(doc, d.assignees || "", ax + 8, ry, assigneesW - 16, ROW_H, 9, BLACK, "center");
+      doc.rect(ax, ry, assigneesW, DUTY_ROW_H).fill(GRAY_50).strokeColor(GRAY_300).lineWidth(0.5).stroke();
+      drawTextInBox(doc, String(d.assignees || ""), ax + 8, ry, assigneesW - 16, DUTY_ROW_H, DUTY_TEXT_FS, BLACK, "center");
 
-      ry += ROW_H;
+      ry += DUTY_ROW_H;
     }
   }
 
