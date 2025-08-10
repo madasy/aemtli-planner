@@ -39,12 +39,28 @@ function drawTextInBox(
   fontSize: number,
   color: string,
   align: "left" | "center" = "left",
-  lineBreak = true
+  lineBreak = true,
+  padY = 3 // <-- small top padding so text never touches the border
 ) {
   doc.fontSize(fontSize).fillColor(color);
   const textHeight = doc.heightOfString(text, { width: w, align, lineBreak });
-  const yCentered = y + Math.max(0, (h - textHeight) / 2);
-  doc.text(text, x, yCentered, { width: w, height: h, align, lineBreak });
+  const centered = y + Math.max(padY, (h - textHeight) / 2);
+  doc.text(text, x, centered, { width: w, height: h, align, lineBreak });
+}
+
+// helper: measure height for wrapped text at a given font size
+function measureH(
+  doc: PDFKit.PDFDocument,
+  text: string,
+  w: number,
+  fs: number,
+  align: "left" | "center" = "left"
+) {
+  const prev = (doc as any)._fontSize ?? fs;
+  doc.fontSize(fs);
+  const h = doc.heightOfString(text, { width: w, align, lineBreak: true });
+  doc.fontSize(prev);
+  return h;
 }
 
 // shrink font-size down to minFs so text fits targetWidth
@@ -127,6 +143,7 @@ export async function renderPlanPdf(res: Response) {
   const HEADER_FS     = 9;
   const DUTY_HEAD_FS  = 11;
   const DUTY_TEXT_FS  = 8;
+  const BASE_ROW_H = 28; // a touch taller for breathing room
 
   // longest assigned name (for single-line fit)
   let longestName = "";
@@ -183,66 +200,71 @@ export async function renderPlanPdf(res: Response) {
   }
   y += HEADER_H;
 
-  // WEEKLY rows
-  for (const t of weekly) {
-    // task cell bg purple
-    doc.rect(left, y, taskColW, ROW_H).fillAndStroke(THEME.taskNameBg, THEME.primary);
-    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left", true);
+  
+// --- WEEKLY rows ---
+for (const t of weekly) {
+  // how tall does the task title need to be?
+  const titleW = taskColW - 12;
+  const titleH = measureH(doc, t.title, titleW, cellFs);
+  const rowH = Math.max(BASE_ROW_H, Math.ceil(titleH) + 8); // +8 for vertical padding
 
-    for (let w = 0; w < WEEKS; w++) {
-      const x   = left + taskColW + cellW * w;
-      const a   = cellFor(t.id, w);
-      const pid = a?.personId ?? null;
-      const label = personName(pid);
+  // task title cell (bg purple-50), centered vertically
+  doc.rect(left, y, taskColW, rowH).fillAndStroke(THEME.taskNameBg, THEME.primary);
+  drawTextInBox(doc, t.title, left + 6, y, titleW, rowH, cellFs, BLACK, "left", true, 3);
 
-      if (pid == null) { // bg only when empty
-        doc.save();
-        doc.rect(x, y, cellW, ROW_H).fill(THEME.emptyBg);
-        doc.restore();
-      }
-      doc.rect(x, y, cellW, ROW_H).strokeColor(THEME.primary).lineWidth(0.4).stroke();
+  // week cells use the **same rowH**
+  for (let w = 0; w < WEEKS; w++) {
+    const x = left + taskColW + cellW * w;
+    const a = cellFor(t.id, w);
+    const pid = a?.personId ?? null;
+    const label = personName(pid);
 
-      const fs = clamp(fitTextToWidth(doc, label, cellW - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
-      drawTextInBox(doc, label || "", x + 6, y, cellW - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "left");
-    }
-    y += ROW_H;
+    if (pid == null) { doc.save(); doc.rect(x, y, cellW, rowH).fill(THEME.emptyBg); doc.restore(); }
+    doc.rect(x, y, cellW, rowH).strokeColor(THEME.primary).lineWidth(0.4).stroke();
+
+    const fs = clamp(fitTextToWidth(doc, label, cellW - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
+    drawTextInBox(doc, label, x + 6, y, cellW - 12, rowH, fs, pid == null ? THEME.emptyFg : BLACK, "left");
   }
-
+ // separator
+  y += rowH;
+}
   // separator
-  y += 4;
-  doc.moveTo(left, y).lineTo(left + taskColW + cellW * WEEKS, y).lineWidth(1).strokeColor(THEME.primary).stroke();
-  y += 6;
+//  y += 4;
+  //doc.moveTo(left, y).lineTo(left + taskColW + cellW * WEEKS, y).lineWidth(1).strokeColor(THEME.primary).stroke();
+  //y += 6;
 
-  // BIWEEKLY rows (merge contiguous equal assignee)
-  for (const t of biweekly) {
-    doc.rect(left, y, taskColW, ROW_H).fillAndStroke(THEME.taskNameBg, THEME.primary);
-    drawTextInBox(doc, t.title, left + 6, y, taskColW - 12, ROW_H, cellFs, BLACK, "left", true);
+// --- BIWEEKLY rows ---
+for (const t of biweekly) {
+  const titleW = taskColW - 12;
+  const titleH = measureH(doc, t.title, titleW, cellFs);
+  const rowH = Math.max(BASE_ROW_H, Math.ceil(titleH) + 8);
 
-    let w = 0;
-    while (w < WEEKS) {
-      const a0 = cellFor(t.id, w);
-      const a1 = w + 1 < WEEKS ? cellFor(t.id, w + 1) : null;
-      const same = !!(a0 && a1 && a0.personId != null && a1.personId === a0.personId);
-      const span = same ? 2 : 1;
+  doc.rect(left, y, taskColW, rowH).fillAndStroke(THEME.taskNameBg, THEME.primary);
+  drawTextInBox(doc, t.title, left + 6, y, titleW, rowH, cellFs, BLACK, "left", true, 3);
 
-      const x   = left + taskColW + cellW * w;
-      const pid = a0?.personId ?? null;
-      const label = personName(pid);
+  let w = 0;
+  while (w < WEEKS) {
+    const a0 = cellFor(t.id, w);
+    const a1 = w + 1 < WEEKS ? cellFor(t.id, w + 1) : null;
+    const same = !!(a0 && a1 && a0.personId != null && a1.personId === a0.personId);
+    const span = same ? 2 : 1;
 
-      if (pid == null) {
-        doc.save();
-        doc.rect(x, y, cellW * span, ROW_H).fill(THEME.emptyBg);
-        doc.restore();
-      }
-      doc.rect(x, y, cellW * span, ROW_H).strokeColor(THEME.primary).lineWidth(0.4).stroke();
+    const x = left + taskColW + cellW * w;
+    const pid = a0?.personId ?? null;
+    const label = personName(pid);
 
-      const fs = clamp(fitTextToWidth(doc, label, cellW * span - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
-      drawTextInBox(doc, label || "", x + 6, y, cellW * span - 12, ROW_H, fs, pid == null ? THEME.emptyFg : BLACK, "center");
+    if (pid == null) { doc.save(); doc.rect(x, y, cellW * span, rowH).fill(THEME.emptyBg); doc.restore(); }
+    doc.rect(x, y, cellW * span, rowH).strokeColor(THEME.primary).lineWidth(0.4).stroke();
 
-      w += span;
-    }
-    y += ROW_H;
+    const fs = clamp(fitTextToWidth(doc, label, cellW * span - CELL_PAD, cellFs, MIN_CELL_FS), MIN_CELL_FS, cellFs);
+    // center names in biweekly cells
+    drawTextInBox(doc, label, x + 6, y, cellW * span - 12, rowH, fs, pid == null ? THEME.emptyFg : BLACK, "center");
+
+    w += span;
   }
+
+  y += rowH;
+}
 
   // ---- Duties (Fixed / Honor) aligned to bottom ----
   const fixed = duties.filter((d:any)=>d.kind==='FIXED').sort((a:any,b:any)=>a.order-b.order);
