@@ -7,8 +7,7 @@ export type Person = {
   activeWeekly: boolean;
   activeBiweekly: boolean;
   exceptions?: string[];       // slugs to skip
-  // Optional: array of date ranges a person is unavailable (YYYY-MM-DD)
-  // Not typed strictly to avoid breaking older callers; cast at runtime.
+  // optional: unavailable date ranges: [{from:'YYYY-MM-DD', to:'YYYY-MM-DD'}]
   // unavailable?: Array<{ from: string; to: string }>;
 };
 
@@ -45,28 +44,27 @@ export function buildPlan({
 }): Slot[] {
   const slots: Slot[] = [];
 
-  // ---- helpers ----
-// Monday of a given weekIndex (used by isAvailable)
-const weekMonday = (startsOn: Date, w: number) => {
-  const d = new Date(startsOn);
-  d.setDate(d.getDate() + w * 7);
-  d.setHours(0, 0, 0, 0);
-  return d;
-};
+  // ---------- helpers ----------
+  const weekMonday = (base: Date, w: number) => {
+    const d = new Date(base);
+    d.setDate(d.getDate() + w * 7);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
 
-function isAvailable(p: Person, startsOn: Date, weekIdx: number) {
-  const blocks = (p as any).unavailable as Array<{ from: string; to: string }> | undefined;
-  if (!blocks?.length) return true;
-  const day = weekMonday(startsOn, weekIdx).getTime();
-  for (const b of blocks) {
-    const from = new Date(`${b.from}T00:00:00`).getTime();
-    const to = new Date(`${b.to}T23:59:59`).getTime();
-    if (day >= from && day <= to) return false;
+  function isAvailable(p: Person, base: Date, weekIdx: number) {
+    const blocks = (p as any).unavailable as Array<{ from: string; to: string }> | undefined;
+    if (!blocks?.length) return true;
+    const day = weekMonday(base, weekIdx).getTime();
+    for (const b of blocks) {
+      const from = new Date(`${b.from}T00:00:00`).getTime();
+      const to   = new Date(`${b.to}T23:59:59`).getTime();
+      if (day >= from && day <= to) return false;
+    }
+    return true;
   }
-  return true;
-}
 
-  // per-week load tracking: weekIndex -> (personId -> count)
+  // per-week capacity: weekIndex -> (personId -> count)
   const load = new Map<number, Map<number, number>>();
   const can = (pid: number, w: number, kind: "weekly" | "biweekly") => {
     const m = load.get(w) ?? new Map<number, number>();
@@ -80,152 +78,165 @@ function isAvailable(p: Person, startsOn: Date, weekIdx: number) {
     load.set(w, m);
   };
 
-  const weeklyTasks = tasks.filter((t) => t.cadence === "weekly");
-  const biweeklyTasks = tasks.filter((t) => t.cadence === "biweekly");
+  const weeklyTasks   = tasks.filter(t => t.cadence === "weekly");
+  const biweeklyTasks = tasks.filter(t => t.cadence === "biweekly");
 
-  const wPool = peopleWeekly.filter((p) => p.activeWeekly);
-  const bPool = peopleBiweekly.filter((p) => p.activeBiweekly);
+  const wPool = peopleWeekly.filter(p => p.activeWeekly);
+  const bPool = peopleBiweekly.filter(p => p.activeBiweekly);
 
-  const wGen = cycle(wPool);
+  const wGen = cycle(wPool); // used only to vary tie order
   const bGen = cycle(bPool);
 
-  // Track fairness: how many weekly assignments we’ve given each person (for 16 weeks)
-  const weeklyAssignedSoFar = new Map<number, number>(); // personId -> count
-  const incWeeklyAssigned = (pid: number) =>
-    weeklyAssignedSoFar.set(pid, (weeklyAssignedSoFar.get(pid) ?? 0) + 1);
-  const getWeeklyAssigned = (pid: number) => weeklyAssignedSoFar.get(pid) ?? 0;
+  // ---------- WEEKLY (balanced across tasks & people) ----------
+  // totals across all weekly tasks
+  const totalWeeklyAssigned = new Map<number, number>(); // personId -> count
+  const incTotalWeekly = (pid:number) => totalWeeklyAssigned.set(pid, (totalWeeklyAssigned.get(pid) ?? 0) + 1);
+  const getTotalWeekly = (pid:number) => totalWeeklyAssigned.get(pid) ?? 0;
 
-  // Track fairness for biweekly ON-blocks: personId -> number of ON-blocks
-  const biBlocksTaken = new Map<number, number>();
-  const incBiBlocks = (pid: number) =>
-    biBlocksTaken.set(pid, (biBlocksTaken.get(pid) ?? 0) + 1);
-  const getBiBlocks = (pid: number) => biBlocksTaken.get(pid) ?? 0;
+  // per-task per-person counts
+  const perTaskCounts = new Map<number, Map<number, number>>(); // taskId -> (personId -> count)
+  const incPerTask = (tid:number, pid:number) => {
+    const m = perTaskCounts.get(tid) ?? new Map<number, number>();
+    m.set(pid, (m.get(pid) ?? 0) + 1);
+    perTaskCounts.set(tid, m);
+  };
+  const getPerTask = (tid:number, pid:number) => (perTaskCounts.get(tid)?.get(pid) ?? 0);
 
-// simple rotating cursor so ties don’t always start at index 0
-let biCursor = 0;
+  // last week a person did a specific task (avoid immediate repeats)
+  const lastWeekOnTask = new Map<number, Map<number, number>>(); // taskId -> (personId -> lastWeek)
+  const setLastWeek = (tid:number, pid:number, wk:number) => {
+    const m = lastWeekOnTask.get(tid) ?? new Map<number, number>();
+    m.set(pid, wk);
+    lastWeekOnTask.set(tid, m);
+  };
+  const getLastWeek = (tid:number, pid:number) => (lastWeekOnTask.get(tid)?.get(pid) ?? -999);
 
-  // before weekly loop, compute quotas
-const totalWeeklySlots = weeklyTasks.length * weeks;
-const weeklyPoolSize = Math.max(1, wPool.length);
-const avgWeekly = Math.round(totalWeeklySlots / weeklyPoolSize);
+  // deterministic rotation so ties don’t always pick the same person
+  const seedFor = (taskIndex:number, weekIndex:number) => (taskIndex*7 + weekIndex*3);
 
-const quota = new Map<number, number>();
-for (const p of wPool) {
-  const shame = Math.max(0, (p as any).shame ?? (p as any).shameCount ?? 0);
-  quota.set(p.id, avgWeekly + shame);
-}
-
-  // ---------- WEEKLY ----------
   for (let weekIndex = 0; weekIndex < weeks; weekIndex++) {
-    for (const t of weeklyTasks) {
-      // choose the best candidate:
-      // - not excepted for this task
-      // - available this week
-      // - under weekly cap for this week
-      // - minimize score = assignedSoFar / (1 + shame)
-      let picked: number | null = null;
+    for (let ti = 0; ti < weeklyTasks.length; ti++) {
+      const t = weeklyTasks[ti];
+
+      // candidate pool
+      const candidates = wPool.filter(p =>
+        !p.exceptions?.includes?.(t.slug) &&
+        isAvailable(p, startsOn, weekIndex) &&
+        can(p.id, weekIndex, "weekly")
+      );
+
+      if (!candidates.length) {
+        slots.push({ taskId: t.id, weekIndex, personId: null });
+        continue;
+      }
+
+      // rotate evaluation order
+      const rotated = [...candidates];
+      const rot = seedFor(ti, weekIndex) % rotated.length;
+      rotated.push(...rotated.splice(0, rot));
+
+      // score: lower is better
+      //  - global balance weighted by shame/shameCount
+      //  - avoid giving the same task repeatedly to the same person
+      //  - avoid very recent repeats (min-gap preference)
+      const MIN_GAP = 3;
+      let bestPid: number | null = null;
       let bestScore = Number.POSITIVE_INFINITY;
 
-      // Look at each candidate roughly once, but use the generator to vary start point (tie-breaker).
-      for (let tries = 0; tries < Math.max(1, wPool.length); tries++) {
-        const p = wGen.next().value as Person;
-        if (!p) continue;
-        if (p.exceptions?.includes?.(t.slug)) continue;
-        if (!isAvailable(p, startsOn, weekIndex)) continue;
-        if (!can(p.id, weekIndex, "weekly")) continue;
+      for (const p of rotated) {
+        const shame = Math.max(0, (p as any).shame ?? (p as any).shameCount ?? 0);
+        const total = getTotalWeekly(p.id);
+        const perTask = getPerTask(t.id, p.id);
+        const last = getLastWeek(t.id, p.id);
+        const since = weekIndex - last;
 
-        const shame = (p as any).shame ?? (p as any).shameCount ?? 0;
-        const assigned = getWeeklyAssigned(p.id);
-        const q = quota.get(p.id) ?? avgWeekly;
-        // lower score ⇒ picked first; people below quota are strongly preferred
-        const score = assigned / Math.max(1, q);
-        
-        if (score < bestScore) {
-          bestScore = score;
-          picked = p.id;
-        }
-      }
+        const recentPenalty =
+          last < 0 ? 0 :
+          (since <= 1 ? 6 : since <= 2 ? 3 : since < MIN_GAP ? 1 : 0);
 
-      if (picked != null) {
-        bump(picked, weekIndex);
-        incWeeklyAssigned(picked);
-      }
-      slots.push({ taskId: t.id, weekIndex, personId: picked });
-    }
-  }
+        const score =
+          (total / (1 + shame)) * 2 +   // global balance (Schämtliliste bumps load)
+          perTask * 3 +                  // spread people across different tasks
+          recentPenalty;                 // avoid immediate repeats
 
-  // ---------- BIWEEKLY: 2 ON, 2 OFF with offset ----------
-
-
-  // ---------- BIWEEKLY: 2 ON, 2 OFF with per-task offset ----------
-// We fill an exact calendar of length `weeks` per task. ON blocks are 2 weeks,
-// OFF blocks are 2 weeks. The same person must do both weeks in an ON block.
-const BI_ON = 2;
-const BI_OFF = 2;
-const BI_CYCLE = BI_ON + BI_OFF; // 4
-
-
-
-for (const t of biweeklyTasks) {
-  const off = t.offsetWeeks ?? 0;
-  const cal: (number | null)[] = Array.from({ length: weeks }, () => null);
-
-  // Walk blocks starting at 'off': [on,on,off,off] repeating
-  for (let startIdx = off; startIdx < weeks; startIdx += BI_CYCLE) {
-    const w0 = startIdx;
-    const w1 = startIdx + 1;
-    if (w0 >= weeks) break;
-
-    // pick one person for this ON block (both weeks)
-    let bestPid: number | null = null;
-    let bestScore = Number.POSITIVE_INFINITY;
-
-    if (bPool.length > 0) {
-      for (let i = 0; i < bPool.length; i++) {
-        const p = bPool[(biCursor + i) % bPool.length];
-
-        // skip if person is not allowed for this task
-        if (p.exceptions?.includes?.(t.slug)) continue;
-
-        // availability: must be available both weeks of the ON pair
-        if (!isAvailable(p, startsOn, w0)) continue;
-        if (w1 < weeks && !isAvailable(p, startsOn, w1)) continue;
-
-        // weekly capacity caps
-        if (!can(p.id, w0, "biweekly")) continue;
-        if (w1 < weeks && !can(p.id, w1, "biweekly")) continue;
-
-        // fairness score: fewer blocks taken wins; tie is broken by cursor order
-        const score = getBiBlocks(p.id);
         if (score < bestScore) {
           bestScore = score;
           bestPid = p.id;
         }
       }
-      // rotate cursor so next block doesn’t always begin at same person
-      biCursor = (biCursor + 1) % Math.max(1, bPool.length);
-    }
 
-    // assign picked person to the 2-week ON block
-    if (bestPid != null) {
-      cal[w0] = bestPid;
-      bump(bestPid, w0);
-      if (w1 < weeks) {
-        cal[w1] = bestPid;
-        bump(bestPid, w1);
+      if (bestPid != null) {
+        bump(bestPid, weekIndex);
+        incTotalWeekly(bestPid);
+        incPerTask(t.id, bestPid);
+        setLastWeek(t.id, bestPid, weekIndex);
       }
-      // count this as ONE ON-block for fairness
-      incBiBlocks(bestPid);
+
+      slots.push({ taskId: t.id, weekIndex, personId: bestPid ?? null });
     }
-    // the OFF half (w0+2, w0+3) stays null
   }
 
-  // emit one slot per week for this bi-weekly task
-  for (let w = 0; w < weeks; w++) {
-    slots.push({ taskId: t.id, weekIndex: w, personId: cal[w] });
-  }
-}
+  // ---------- BIWEEKLY: 2 ON, 2 OFF with per-task offset ----------
+  const BI_ON = 2;
+  const BI_OFF = 2;
+  const BI_CYCLE = BI_ON + BI_OFF; // 4
 
+  // fairness for biweekly ON-blocks: personId -> #blocks taken
+  const biBlocksTaken = new Map<number, number>();
+  const incBiBlocks = (pid:number) => biBlocksTaken.set(pid, (biBlocksTaken.get(pid) ?? 0) + 1);
+  const getBiBlocks = (pid:number) => biBlocksTaken.get(pid) ?? 0;
+
+  // rotating cursor so ties don’t start at the same person
+  let biCursor = 0;
+
+  for (const t of biweeklyTasks) {
+    const off = t.offsetWeeks ?? 0;
+    const cal: (number | null)[] = Array.from({ length: weeks }, () => null);
+
+    // walk blocks: [on,on,off,off] repeating
+    for (let startIdx = off; startIdx < weeks; startIdx += BI_CYCLE) {
+      const w0 = startIdx;
+      const w1 = startIdx + 1;
+      if (w0 >= weeks) break;
+
+      let bestPid: number | null = null;
+      let bestScore = Number.POSITIVE_INFINITY;
+
+      if (bPool.length > 0) {
+        for (let i = 0; i < bPool.length; i++) {
+          const p = bPool[(biCursor + i) % bPool.length];
+          if (p.exceptions?.includes?.(t.slug)) continue;
+          if (!isAvailable(p, startsOn, w0)) continue;
+          if (w1 < weeks && !isAvailable(p, startsOn, w1)) continue;
+          if (!can(p.id, w0, "biweekly")) continue;
+          if (w1 < weeks && !can(p.id, w1, "biweekly")) continue;
+
+          const score = getBiBlocks(p.id);
+          if (score < bestScore) {
+            bestScore = score;
+            bestPid = p.id;
+          }
+        }
+        biCursor = (biCursor + 1) % Math.max(1, bPool.length);
+      }
+
+      if (bestPid != null) {
+        cal[w0] = bestPid;
+        bump(bestPid, w0);
+        if (w1 < weeks) {
+          cal[w1] = bestPid;
+          bump(bestPid, w1);
+        }
+        incBiBlocks(bestPid); // count once per ON-block
+      }
+      // OFF part remains null
+    }
+
+    // emit one slot per week for this bi-weekly task
+    for (let w = 0; w < weeks; w++) {
+      slots.push({ taskId: t.id, weekIndex: w, personId: cal[w] });
+    }
+  }
 
   return slots;
 }

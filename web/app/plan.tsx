@@ -145,12 +145,68 @@ export default function Plan() {
     <>
       {/* print helpers */}
       <style jsx global>{`
-        @media print {
-          .no-print { display: none !important; }
-          .table-sticky thead th { position: static !important; }
-          body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        }
-      `}</style>
+  @media print {
+    @page {
+      size: A4 landscape;
+      margin: 12mm;
+      /* Suppress default page header/footer in most browsers */
+      /* Chrome/Edge: can't fully suppress in @page, but layout is correct */
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      max-width: 100vw;
+      max-height: 100vh;
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      overflow: visible !important;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    /* Hide elements with .no-print */
+    .no-print { display: none !important; }
+
+    /* Table layout fixes for print */
+    .table-sticky thead th {
+      position: static !important;
+    }
+    /* Prevent table row/page breaks */
+    table, tr, td, th {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    /* Two columns for duties section */
+    .print-duties {
+      display: grid !important;
+      grid-template-columns: 1fr 1fr !important;
+      gap: 16px !important;
+    }
+    .print-fixed { order: 1;}
+    .print-honor { order: 2;}
+    /* Ensure each print-duties child fills its grid column */
+    .print-duties > div { width: 100%; }
+
+    /* Attempt to scale whole page content to fit A4 landscape */
+    body {
+      /* Calculates scale so the content fits one page */
+      transform: scale(
+        calc(
+          min(
+            1, 
+            (297mm - 24mm) / 100vw, 
+            (210mm - 24mm) / 100vh
+          )
+        )
+      );
+      transform-origin: top left;
+    }
+    /* Remove default head/footer in printed output if browser supports */
+    /* Most browsers remove automatically; headers like date/url are browser controlled */
+  }
+`}</style>
+
 
       {/* Top bar */}
       <div className="no-print flex items-center justify-between gap-3 mb-4">
@@ -191,7 +247,7 @@ export default function Plan() {
       </div>
 
       {/* Grid */}
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto print-duties">
         <table className="min-w-full border border-gray-400 text-sm table-sticky">
           {Header}
           <tbody>
@@ -204,40 +260,43 @@ export default function Plan() {
 
       {/* Duties sections (render only if provided) */}
       {(fixedDuties.length > 0 || honorDuties.length > 0) && (
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-          {fixedDuties.length > 0 && (
-            <div>
-              <h2 className="text-base font-semibold mb-2">Feste Ämtli</h2>
-              <table className="min-w-full border text-sm">
-                <tbody>
-                  {fixedDuties.map((d) => (
-                    <tr key={d.id}>
-                      <td className="border px-2 py-1 w-1/2">{d.label}</td>
-                      <td className="border px-2 py-1">{d.assignees}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+  <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6 print-duties">
 
-          {honorDuties.length > 0 && (
-            <div>
-              <h2 className="text-base font-semibold mb-2">Ehren Ämtli</h2>
-              <table className="min-w-full border text-sm">
-                <tbody>
-                  {honorDuties.map((d) => (
-                    <tr key={d.id}>
-                      <td className="border px-2 py-1 w-1/2">{d.label}</td>
-                      <td className="border px-2 py-1">{d.assignees}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+    {fixedDuties.length > 0 && (
+      <div className="print-fixed">
+        <h2 className="text-base font-semibold mb-2">Feste Ämtli</h2>
+        <table className="min-w-full border text-sm">
+          <tbody>
+            {fixedDuties.map((d) => (
+              <tr key={d.id}>
+                <td className="border px-2 py-1 w-1/2">{d.label}</td>
+                <td className="border px-2 py-1">{d.assignees}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+    {honorDuties.length > 0 && (
+      <div className="print-honor">
+        <h2 className="text-base font-semibold mb-2">Ehren Ämtli</h2>
+        <table className="min-w-full border text-sm">
+          <tbody>
+            {honorDuties.map((d) => (
+              <tr key={d.id}>
+                <td className="border px-2 py-1 w-1/2">{d.label}</td>
+                <td className="border px-2 py-1">{d.assignees}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+
+  </div>
+)}
+
     </>
   );
 }

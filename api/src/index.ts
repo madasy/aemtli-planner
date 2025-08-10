@@ -65,7 +65,6 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
   }));
 
   // ---- 5) fetch people and build shuffled pools (flags respected) ----
-  // CHANGED: include shameCount and unavailable
   const peopleDb = await prisma.person.findMany({
     orderBy: { name: "asc" },
     select: {
@@ -74,24 +73,23 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
       activeWeekly: true,
       activeBiweekly: true,
       exceptions: true,
-      shameCount: true,          // <-- ADDED
-      unavailable: true,         // <-- ADDED
+      shameCount: true,
+      unavailable: true,
     },
   });
 
   const shuffle = <T,>(arr: T[]) => [...arr].sort(() => Math.random() - 0.5);
 
-  // CHANGED: pass shameCount and unavailable through to scheduler
   const weeklyPeople: SchedPerson[] = shuffle(
     peopleDb
       .filter(p => p.activeWeekly)
       .map(p => ({
         id: p.id,
         name: p.name,
-        shame: p.shameCount ?? 0,        // <-- CHANGED
+        shame: p.shameCount ?? 0,
         activeWeekly: p.activeWeekly,
         activeBiweekly: p.activeBiweekly,
-        // @ts-ignore scheduler supports exceptions + unavailable
+        // @ts-ignore
         exceptions: p.exceptions ?? [],
         // @ts-ignore
         unavailable: p.unavailable ?? [],
@@ -104,7 +102,7 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
       .map(p => ({
         id: p.id,
         name: p.name,
-        shame: p.shameCount ?? 0,        // <-- CHANGED
+        shame: p.shameCount ?? 0,
         activeWeekly: p.activeWeekly,
         activeBiweekly: p.activeBiweekly,
         // @ts-ignore
@@ -173,8 +171,8 @@ app.get("/api/plan/current", async (_req, res) => {
   });
 
   if (!plan) {
-    res.setHeader("Cache-Control", "no-store"); // <-- ADDED
-    return res.json({ empty: true, startsOn: null, tasks: [], slots: [], people: [] });
+    res.setHeader("Cache-Control", "no-store");
+    return res.json({ empty: true, startsOn: null, tasks: [], slots: [], people: [], duties: [] });
   }
 
   const tasks = await prisma.task.findMany();
@@ -183,9 +181,10 @@ app.get("/api/plan/current", async (_req, res) => {
     orderBy: [{ weekIndex: "asc" }, { taskId: "asc" }],
   });
   const people = await prisma.person.findMany({ orderBy: { name: "asc" } });
+  const duties = await prisma.duty.findMany({ orderBy: [{ kind: 'asc' }, { order: 'asc' }] }); // <-- ADDED
 
-  res.setHeader("Cache-Control", "no-store"); // <-- ADDED
-  res.json({ empty: false, startsOn: plan.startsOn, weeks: plan.weeks, tasks, slots, people });
+  res.setHeader("Cache-Control", "no-store");
+  res.json({ empty: false, startsOn: plan.startsOn, weeks: plan.weeks, tasks, slots, people, duties }); // <-- ADDED duties to response
 });
 
 /**
@@ -196,7 +195,7 @@ app.get("/api/admin/plan", async (_req: Request, res: Response) => {
   const plan  = draft ?? await prisma.plan.findFirst({ where: { status: "published" }, orderBy: { startsOn: "desc" } });
 
   if (!plan) {
-    res.setHeader("Cache-Control", "no-store"); // <-- ADDED
+    res.setHeader("Cache-Control", "no-store");
     return res.json({ empty: true, plan: null, tasks: [], assignments: [], people: [] });
   }
 
@@ -207,7 +206,7 @@ app.get("/api/admin/plan", async (_req: Request, res: Response) => {
   });
   const people       = await prisma.person.findMany({ orderBy: { name: "asc" } });
 
-  res.setHeader("Cache-Control", "no-store"); // <-- ADDED
+  res.setHeader("Cache-Control", "no-store");
   res.json({ plan, tasks, assignments, people });
 });
 
