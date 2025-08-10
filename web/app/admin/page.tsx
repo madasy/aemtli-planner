@@ -60,6 +60,9 @@ export default function AdminPage() {
   type Duty = { id:number; kind:'FIXED'|'HONOR'; label:string; assignees:string; order:number };
   const [duties, setDuties] = useState<Duty[]>([]);
 
+  // State for the new popup
+  const [countsOpen, setCountsOpen] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -352,6 +355,16 @@ export default function AdminPage() {
               Status: <b>{plan.status}</b> • Start: {new Intl.DateTimeFormat("de-CH", { day: "2-digit", month: "2-digit" }).format(new Date(plan.startsOn))}
             </span>
           )}
+
+          {/* New counts popup trigger */}
+          <button
+            className="border rounded px-3 py-1"
+            onClick={() => setCountsOpen(true)}
+            title="Zuteilungen (16 Wochen) anzeigen"
+          >
+            Zuteilungen (16 Wochen)
+          </button>
+
           <button className="border rounded px-3 py-1" onClick={publish} disabled={busy || !plan?.id}>
             {busy ? "Publiziere…" : "Publish"}
           </button>
@@ -533,31 +546,6 @@ export default function AdminPage() {
             </table>
           </div>
         </div>
-
-        {/* Counts table */}
-        <div className="mb-4 mt-4 overflow-x-auto">
-          <h3 className="font-medium mb-2">Zuteilungen (16 Wochen)</h3>
-          <table className="min-w-[480px] text-sm border">
-            <thead>
-              <tr>
-                <th className="px-2 py-1 border text-left">Person</th>
-                <th className="px-2 py-1 border text-right">Weekly</th>
-                <th className="px-2 py-1 border text-right">Bi-weekly</th>
-                <th className="px-2 py-1 border text-right">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {counts.map(r=>(
-                <tr key={r.personId}>
-                  <td className="px-2 py-1 border">{r.name}</td>
-                  <td className="px-2 py-1 border text-right">{r.weekly}</td>
-                  <td className="px-2 py-1 border text-right">{r.biweekly}</td>
-                  <td className="px-2 py-1 border text-right font-medium">{r.total}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
       </DragDropContext>
 
       {/* Feste & Ehren Ämtli */}
@@ -605,6 +593,57 @@ export default function AdminPage() {
           </div>
         ))}
       </div>
+
+      {/* Zuteilungen Popup */}
+      {countsOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setCountsOpen(false)}
+        >
+          {/* backdrop */}
+          <div className="absolute inset-0 bg-black/40" />
+
+          {/* modal */}
+          <div
+            className="relative bg-white rounded-lg shadow-lg w-[min(90vw,700px)] max-h-[80vh] overflow-auto p-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-base font-semibold">Zuteilungen (16 Wochen)</h3>
+              <button
+                className="border rounded px-2 py-1 text-sm"
+                onClick={() => setCountsOpen(false)}
+                aria-label="Schliessen"
+              >
+                Schliessen
+              </button>
+            </div>
+
+            <table className="min-w-full text-sm border">
+              <thead>
+                <tr>
+                  <th className="px-2 py-1 border text-left">Person</th>
+                  <th className="px-2 py-1 border text-right">Weekly</th>
+                  <th className="px-2 py-1 border text-right">Bi-weekly</th>
+                  <th className="px-2 py-1 border text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {counts.map((r) => (
+                  <tr key={r.personId}>
+                    <td className="px-2 py-1 border">{r.name}</td>
+                    <td className="px-2 py-1 border text-right">{r.weekly}</td>
+                    <td className="px-2 py-1 border text-right">{r.biweekly}</td>
+                    <td className="px-2 py-1 border text-right font-medium">{r.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </main>
   );
 }

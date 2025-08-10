@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, type ReactNode } from 'react';
 import axios from 'axios';
 
 type Task = { id: number; slug: string; title: string; cadence: 'weekly' | 'biweekly' };
