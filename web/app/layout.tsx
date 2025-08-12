@@ -1,8 +1,13 @@
 import "./globals.css";
+import type { Metadata } from 'next';
 
-export const metadata = {
-  title: "Ämtli Plan - Hacienda Jose",
-  description: "Planner for weekly & biweekly tasks",
+
+export const metadata: Metadata = {
+  title: 'Ämtli Plan - Hacienda Jose',
+  description: 'Hacienda Jose Aufgabenplaner',
+  icons: {
+    icon: '/favicon.ico', // relative to /public
+  },
 };
 
 export default function RootLayout({

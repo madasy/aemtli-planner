@@ -159,7 +159,10 @@ function TopBar({
   setSelected: (id: number) => void;
 }) {
   return (
+    
     <div className="flex flex-wrap items-center gap-2 mb-2">
+         <h1 className="table-title m-0 text-lg font-semibold text-gray-800">Ämtliplan - Hacienda Jose</h1>
+         
       {/* ICS */}
       <div className="flex items-center gap-2 border border-gray-300 rounded px-2 py-1 bg-white">
         <label htmlFor="ics-person" className="text-sm whitespace-nowrap">Kalender:</label>

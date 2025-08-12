@@ -5,7 +5,7 @@ import { prisma } from "./db.js";
 // Tailwind-ish colors
 const PURPLE_50 = "#FAF5FF";
 const GRAY_50   = "#F9FAFB";
-const GRAY_100  = "#e3e3e3";
+const GRAY_100  = "#eaedf1";
 const GRAY_300  = "#D1D5DB";
 const GRAY_400  = "#9CA3AF";
 const BLACK     = "#000000";
