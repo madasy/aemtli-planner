@@ -509,6 +509,17 @@ async function editAsDraft() {
                 {busy ? "Publiziere…" : "Publish"}
               </button>
             )}
+            <button
+              className="border rounded px-3 py-1"
+              onClick={async () => {
+                await fetch("/api/auth/logout", { method: "POST" });
+                window.location.href = "/"; // or router.replace("/")
+              }}
+              title="Logout"
+            >
+              Logout
+            </button>
+
         </div>
       </div>
 
