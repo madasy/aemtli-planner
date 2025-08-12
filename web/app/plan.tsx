@@ -8,6 +8,7 @@ type Slot = { taskId: number; weekIndex: number; personId: number | null };
 type Person = { id: number; name: string };
 type Duty = { id: number; kind: 'FIXED' | 'HONOR'; label: string; assignees: string; order: number };
 
+
 export default function Plan() {
   const [data, setData] = useState<any>(null);
   const [selected, setSelected] = useState<number | undefined>();

@@ -1,16 +1,34 @@
 # Ämtli Planner (Starter)
 
-Starter-Repo für 16‑Wochen-Ämtli-Planer mit Next.js (Web) + Express (API) + Prisma + PostgreSQL + Drag&Drop + ICS-Export.
+This repository contains the scheduling logic and PDF generation for the **Hacienda Jose Ämtli Plan**.  
+It automatically assigns household chores ("Ämtli") fairly across all participants, while respecting:
 
-## Features (Starter)
-- 16‑Wochen Rolling-Plan (Start = nächster Montag)
-- Wöchentliche & zweiwöchentliche Tasks (individuelle Offsets)
-- Limit: max 1 Weekly + max 1 Biweekly pro Person/Woche
-- Schämtli-Zähler (Penalty) als Datenmodell + Platzhalterlogik
-- Public Read‑only View (web), Admin-Portal (web) – UI skeleton mit Drag&Drop-Platzhaltern
-- ICS-Export pro Person via API (`/api/ics/:personId?plan=...`)
+- Weekly and bi-weekly task cadences
+- Personal vacation/unavailability dates
+- Exceptions (tasks certain people cannot do)
+- "Schämtliliste" — people who should take more tasks than average
+- Weekly capacity limits per person
+- Balanced distribution across different tasks
 
-> Dies ist ein **Starter**: die Grundlogik, Routen, Datenmodell und UI-Skelette sind vorhanden; Details kannst du iterativ ergänzen.
+## Features
+
+- **Balanced Scheduling**  
+  Assignments are evenly spread over the planning period, accounting for vacations and exceptions.
+
+- **Schämtliliste Support**  
+  People with a higher "shame count" get proportionally more tasks.
+
+- **Weekly & Bi-Weekly Cadence**  
+  Weekly tasks are assigned every week.  
+  Bi-weekly tasks follow a **2 weeks ON, 2 weeks OFF** pattern, starting with optional per-task offsets.
+
+- **Fair Rotation**  
+  Avoids assigning the same task to the same person too often in a short time.
+
+- **PDF Generation**  
+  Creates a printable PDF of the full schedule with adjustable layout, font size, and cell alignment.
+
+---
 
 ## Quickstart (Docker)
 ```bash
