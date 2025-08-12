@@ -23,12 +23,12 @@ The first step is to build multi-architecture Docker images for your application
 
     * **For the `web` service**:
         ```bash
-        docker buildx build --platform linux/amd64,linux/arm64 -t madasy/aemtli-planner-web:latest --push ./web
+        docker buildx build --platform linux/arm64 -t madasy/aemtli-planner-web:latest --push ./web
         ```
 
     * **For the `api` service**:
         ```bash
-        docker buildx build --platform linux/amd64,linux/arm64 -t madasy/aemtli-planner-api:latest --push ./api
+        docker buildx build --platform linux/arm64 -t madasy/aemtli-planner-api:latest --push ./api
         ```
 
     **Command Breakdown**:
@@ -45,6 +45,7 @@ The first step is to build multi-architecture Docker images for your application
     services:
       db:
         image: postgres:16
+        restart: always
         environment:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: aemtli
@@ -55,6 +56,7 @@ The first step is to build multi-architecture Docker images for your application
 
       api:
         image: madasy/aemtli-planner-api:latest
+        restart: always
         environment:
           DATABASE_URL: postgresql://postgres:postgres@db:5432/aemtli?schema=public
           ICS_START_TIME: ${ICS_START_TIME}
@@ -65,6 +67,7 @@ The first step is to build multi-architecture Docker images for your application
 
       web:
         image: madasy/aemtli-planner-web:latest
+        restart: always
         environment:
           NEXT_PUBLIC_API_BASE: http://api:4000
           ADMIN_USERNAMES: ${ADMIN_USERNAMES}
@@ -103,18 +106,41 @@ Once your images are on Docker Hub and you have the updated `docker-compose.yml`
     # You must log out and log back in for the group changes to take effect.
     ```
 
-3.  **Transfer the `docker-compose.yml` file**: Copy the updated `docker-compose.yml` file to your Raspberry Pi.
+3.  **Create the `docker-compose.yml` file manually**: Instead of transferring the file, you will create a new directory and file on the Raspberry Pi, then paste the content.
 
     ```bash
-    scp /path/to/aemtli-planner-starter/docker-compose.yml pi@your_pi_ip_address:/home/pi/aemtli-planner-starter/
+    # Navigate to your home directory
+    cd /home/jose/
+    # Create a new project folder
+    mkdir aemtli-planner
+    # Navigate into the new folder
+    cd aemtli-planner/
+    # Create the docker-compose.yml file and open it with nano
+    nano docker-compose.yml
     ```
+    
+    * Copy the `docker-compose.yml` content from **Step 1.4**.
+    * Paste the content into the `nano` editor (on most terminals, this is done with `Ctrl+Shift+V` or right-click `Paste`).
+    * Save the file by pressing `Ctrl + O`, then `Enter`.
+    * Exit the editor by pressing `Ctrl + X`.
 
-4.  **Start the application**: In the directory where you placed the `docker-compose.yml` file, run the `docker compose up` command. Docker will automatically pull the correct `linux/arm64` images from Docker Hub and start all the services.
+4.  **Start the application**: In the `aemtli-planner` directory, run the `docker compose up` command. Docker will automatically pull the correct `linux/arm64` images from Docker Hub and start all the services.
 
     ```bash
     docker compose up -d
     ```
     * `up`: Starts the services defined in the `docker-compose.yml` file.
     * `-d`: Runs the containers in detached mode (in the background).
+
+5.  **Redeploy the Containers**: In case you need to redeploy the containers to apply the new configuration
+
+    ```bash
+    cd /home/jose/aemtli-planner/
+    ```
+    ```bash
+    docker compose up -d --force-recreate
+    ```
+    * `--force-recreate`:  flag ensures that the containers are rebuilt with the new configuration, including the restart policy.
+    
 
 Your application should now be running on the Raspberry Pi! You can access the web interface by navigating to your Pi's IP address in a web browser.
