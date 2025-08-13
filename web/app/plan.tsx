@@ -12,11 +12,11 @@ type Duty = { id: number; kind: 'FIXED' | 'HONOR'; label: string; assignees: str
 export default function Plan() {
   const [data, setData] = useState<any>(null);
   const [selected, setSelected] = useState<number | undefined>();
-  const api = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
+  const api = process.env.NEXT_PUBLIC_API_BASE || "/_api";
 
   useEffect(() => {
     axios
-      .get(api + '/api/plan/current')
+      .get('/_api/plan/current')
       .then((r) => {
         setData(r.data);
         const ppl: Person[] = r.data.people ?? [];
@@ -181,7 +181,7 @@ export default function Plan() {
       <button
         className={`inline-flex items-center gap-1 border rounded-md px-3 py-1 text-sm font-medium 
                     ${selected === 0 ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-500 text-white hover:bg-blue-600 transition duration-150 ease-in-out'}`}
-        onClick={() => selected !== 0 && (window.location.href = `${api}/api/ics/${selected}`)}
+        onClick={() => selected !== 0 && (window.location.href = `/_api/ics/${selected}`)}
         disabled={selected === 0} // Disable button if no person is selected (value 0)
         title={selected === 0 ? "Bitte zuerst eine Person auswählen" : "ICS-Datei für die ausgewählte Person herunterladen"}
       >
@@ -195,7 +195,7 @@ export default function Plan() {
  {/* PDF Download */}
     <button
       className="inline-flex items-center gap-1 border border-gray-300 rounded-lg px-3 py-2 text-sm font-medium bg-white hover:bg-gray-100 shadow-sm transition duration-150 ease-in-out"
-      onClick={() => window.open(`${api}/api/plan/pdf`, "_blank")}
+      onClick={() => window.open(`/_api/plan/pdf`, "_blank")}
       title="Den aktuellen Ämtliplan als PDF herunterladen"
     >
       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">

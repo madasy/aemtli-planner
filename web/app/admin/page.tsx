@@ -42,8 +42,7 @@ const MONDAY_BASE_ISO = '2000-01-03';
 
 
 export default function AdminPage() {
-  const api = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
-
+  const api = process.env.NEXT_PUBLIC_API_BASE || "/_api";
   const [loading, setLoading] = useState(true);
   const [empty, setEmpty] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,7 +84,7 @@ export default function AdminPage() {
         return;
       }
       try {
-        const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+        const response = await axios.get(`/_api/people/${vacationPersonId}/unavailable`);
         setCurrentPersonUnavailable(response.data);
       } catch (error) {
         console.error("Failed to fetch vacation entries:", error);
@@ -99,9 +98,9 @@ export default function AdminPage() {
     setLoading(true);
     try {
       const [r1, r2, r3] = await Promise.all([
-        axios.get<AdminPlanResponse>(`${api}/api/admin/plan`, { headers: { 'Cache-Control': 'no-store' } }),
-        axios.get<Person[]>(`${api}/api/people`, { headers: { 'Cache-Control': 'no-store' } }),
-        axios.get<Duty[]>(`${api}/api/duties`).catch(() => ({ data: [] as Duty[] })), // tolerate missing route
+        axios.get<AdminPlanResponse>(`/_api/admin/plan`, { headers: { 'Cache-Control': 'no-store' } }),
+        axios.get<Person[]>(`/_api/people`, { headers: { 'Cache-Control': 'no-store' } }),
+        axios.get<Duty[]>(`/_api/duties`).catch(() => ({ data: [] as Duty[] })), // tolerate missing route
       ]);
       const d = r1.data ?? {};
       setEmpty(!!d.empty || !d.plan);
@@ -122,7 +121,7 @@ export default function AdminPage() {
     if (current.has(taskSlug)) current.delete(taskSlug);
     else current.add(taskSlug);
 
-    await axios.patch(`${api}/api/people/${person.id}/exceptions`, {
+    await axios.patch(`/_api/people/${person.id}/exceptions`, {
       exceptions: Array.from(current),
     });
     await load();
@@ -145,7 +144,7 @@ export default function AdminPage() {
     if (!confirm("This will delete the current draft and create a new plan. Continue?")) return;
     setBusy(true);
     try {
-      await axios.post(`${api}/api/plan/generate`, { startDate });
+      await axios.post(`/_api/plan/generate`, { startDate });
       await load();
     } finally {
       setBusy(false);
@@ -156,7 +155,7 @@ export default function AdminPage() {
     if (!plan?.id) return;
     setBusy(true);
     try {
-      await axios.post(`${api}/api/plan/${plan.id}/publish`);
+      await axios.post(`/_api/plan/${plan.id}/publish`);
       await load();
     } finally {
       setBusy(false);
@@ -167,17 +166,17 @@ export default function AdminPage() {
   async function addPerson() {
     const name = newName.trim();
     if (!name) return;
-    await axios.post(`${api}/api/people`, { name, activeWeekly: false, activeBiweekly: false });
+    await axios.post(`/_api/people`, { name, activeWeekly: false, activeBiweekly: false });
     setNewName('');
     await load();
   }
   async function toggleFlag(p: Person, key: 'activeWeekly' | 'activeBiweekly') {
-    await axios.patch(`${api}/api/people/${p.id}`, { [key]: !p[key] });
+    await axios.patch(`/_api/people/${p.id}`, { [key]: !p[key] });
     await load();
   }
   async function deletePerson(p: Person) {
     if (!confirm(`"${p.name}" wirklich löschen?`)) return;
-    await axios.delete(`${api}/api/people/${p.id}`);
+    await axios.delete(`/_api/people/${p.id}`);
     await load();
   }
 
@@ -185,18 +184,18 @@ export default function AdminPage() {
   async function addDuty(kind: 'FIXED' | 'HONOR') {
     const label = prompt('Titel?'); if (!label) return;
     const order = (duties.filter(d => d.kind === kind).length || 0);
-    await axios.post(`${api}/api/duties`, { kind, label, assignees: '', order });
-    const r = await axios.get(`${api}/api/duties`);
+    await axios.post(`/_api/duties`, { kind, label, assignees: '', order });
+    const r = await axios.get(`/_api/duties`);
     setDuties(r.data || []);
   }
   async function updateDuty(d: Duty, patch: Partial<Duty>) {
-    await axios.patch(`${api}/api/duties/${d.id}`, patch);
-    const r = await axios.get(`${api}/api/duties`);
+    await axios.patch(`/_api/duties/${d.id}`, patch);
+    const r = await axios.get(`/_api/duties`);
     setDuties(r.data || []);
   }
   async function deleteDuty(d: Duty) {
     if (!confirm(`"${d.label}" löschen?`)) return;
-    await axios.delete(`${api}/api/duties/${d.id}`);
+    await axios.delete(`/_api/duties/${d.id}`);
     setDuties(prev => prev.filter(x => x.id !== d.id));
   }
 
@@ -215,14 +214,14 @@ export default function AdminPage() {
 
     try {
       // Fetch current unavailable list
-      const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+      const response = await axios.get(`/_api/people/${vacationPersonId}/unavailable`);
       const cur = response.data as any[];
 
       // Add new vacation
       cur.push({ from: iso(start), to: iso(end) });
 
       // Update on server
-      await axios.patch(`${api}/api/people/${vacationPersonId}/unavailable`, { unavailable: cur });
+      await axios.patch(`/_api/people/${vacationPersonId}/unavailable`, { unavailable: cur });
       
       // Update local state immediately for display
       setCurrentPersonUnavailable(cur); 
@@ -241,13 +240,13 @@ export default function AdminPage() {
       const updatedUnavailable = currentPersonUnavailable.filter(
         (v) => !(v.from === from && v.to === to)
       );
-      await axios.patch(`${api}/api/people/${vacationPersonId}/unavailable`, { unavailable: updatedUnavailable });
+      await axios.patch(`/_api/people/${vacationPersonId}/unavailable`, { unavailable: updatedUnavailable });
       setCurrentPersonUnavailable(updatedUnavailable); // optimistic UI update
       await load(); // re-sync main state
     } catch (error) {
       console.error("Failed to delete vacation:", error);
       // Re-fetch in case of error to revert the UI
-      const response = await axios.get(`${api}/api/people/${vacationPersonId}/unavailable`);
+      const response = await axios.get(`/_api/people/${vacationPersonId}/unavailable`);
       setCurrentPersonUnavailable(response.data);
     }
   }
@@ -257,8 +256,8 @@ const isPublished = plan?.status === "published";
 
 async function editAsDraft() {
   if (!plan?.id) return;
-  await axios.post(`${api}/api/plan/${plan.id}/clone-to-draft`);
-  await load(); // after this, /api/admin/plan will return the new draft
+  await axios.post(`/_api/plan/${plan.id}/clone-to-draft`);
+  await load(); // after this, /_api/admin/plan will return the new draft
 }
 
   function mondayLabel(week: number) {
@@ -364,7 +363,7 @@ async function editAsDraft() {
     };
     const patchMany = (updates: Array<{ id: number, personId: number | null }>) => {
       updates.forEach(u => {
-        axios.patch(`${api}/api/assignment/${u.id}`, { personId: u.personId }).catch(load);
+        axios.patch(`/_api/assignment/${u.id}`, { personId: u.personId }).catch(load);
       });
     };
 
@@ -512,7 +511,7 @@ async function editAsDraft() {
             <button
               className="border rounded px-3 py-1"
               onClick={async () => {
-                await fetch("/api/auth/logout", { method: "POST" });
+                await fetch("/_api/auth/logout", { method: "POST" });
                 window.location.href = "/"; // or router.replace("/")
               }}
               title="Logout"
@@ -892,13 +891,13 @@ async function editAsDraft() {
                   <div className="w-40 truncate">{p.name}</div>
                   <button className="border rounded px-2 py-0.5"
                     onClick={async () => {
-                      await axios.patch(`${api}/api/people/${p.id}`, { shameCount: (p.shameCount ?? 0) + 1 });
+                      await axios.patch(`/_api/people/${p.id}`, { shameCount: (p.shameCount ?? 0) + 1 });
                       await load();
                     }}>+1</button>
                   <span className="text-sm text-gray-600"> {p.shameCount ?? 0} </span>
                   <button className="border rounded px-2 py-0.5"
                     onClick={async () => {
-                      await axios.patch(`${api}/api/people/${p.id}`, { shameCount: 0 });
+                      await axios.patch(`/_api/people/${p.id}`, { shameCount: 0 });
                       await load();
                     }}>Reset</button>
                 </div>

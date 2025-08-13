@@ -16,7 +16,7 @@ app.get("/", (_req: Request, res: Response) => res.send("Ämtli API OK"));
 /**
  * Generate a DRAFT plan in DB with assignments (has IDs)
  */
-app.post("/api/plan/generate", async (req: Request, res: Response) => {
+app.post("/_api/plan/generate", async (req: Request, res: Response) => {
   // ---- 1) start date (snap to Monday) ----
   function nextOrSameMonday(from = new Date()) {
     const d = new Date(from);
@@ -156,7 +156,7 @@ app.post("/api/plan/generate", async (req: Request, res: Response) => {
  * Generate PDF of the current plan
  */
 
-app.get("/api/plan/pdf", async (_req, res) => {
+app.get("/_api/plan/pdf", async (_req, res) => {
   try {
     await renderPlanPdf(res);
   } catch (e:any) {
@@ -169,7 +169,7 @@ app.get("/api/plan/pdf", async (_req, res) => {
  * Publish latest draft by id
  */
 // Publish latest draft by id (archive all other published)
-app.post("/api/plan/:id/publish", async (req: Request, res: Response) => {
+app.post("/_api/plan/:id/publish", async (req: Request, res: Response) => {
   const { id } = req.params;
 
   const [_, plan] = await prisma.$transaction([
@@ -188,7 +188,7 @@ app.post("/api/plan/:id/publish", async (req: Request, res: Response) => {
 });
 
 // Clone a published plan into a new draft
-app.post("/api/plan/:id/clone-to-draft", async (req, res) => {
+app.post("/_api/plan/:id/clone-to-draft", async (req, res) => {
   const { id } = req.params;
 
   const src = await prisma.plan.findUnique({ where: { id } });
@@ -220,7 +220,7 @@ app.post("/api/plan/:id/clone-to-draft", async (req, res) => {
 /**
  * Public current plan (PUBLISHED only)
  */
-app.get("/api/plan/current", async (_req, res) => {
+app.get("/_api/plan/current", async (_req, res) => {
   const plan = await prisma.plan.findFirst({
     where: { status: "published" },
     orderBy: { startsOn: "desc" },
@@ -246,7 +246,7 @@ app.get("/api/plan/current", async (_req, res) => {
 /**
  * Admin plan (DRAFT if exists, else PUBLISHED) including assignment IDs
  */
-app.get("/api/admin/plan", async (_req: Request, res: Response) => {
+app.get("/_api/admin/plan", async (_req: Request, res: Response) => {
   const draft = await prisma.plan.findFirst({ where: { status: "draft" }, orderBy: { startsOn: "desc" } });
   const plan  = draft ?? await prisma.plan.findFirst({ where: { status: "published" }, orderBy: { startsOn: "desc" } });
 
@@ -280,7 +280,7 @@ app.get("/__routes", (_req, res) => {
 /**
  * Update one assignment (drag & drop)
  */
-app.patch("/api/assignment/:id", async (req: Request, res: Response) => {
+app.patch("/_api/assignment/:id", async (req: Request, res: Response) => {
   const id = Number(req.params.id);
   const { personId } = req.body as { personId: number | null };
   await prisma.assignment.update({ where: { id }, data: { personId } });
@@ -290,7 +290,7 @@ app.patch("/api/assignment/:id", async (req: Request, res: Response) => {
 /**
  * People CRUD + flags + exceptions + shameCount
  */
-app.get("/api/people", async (_req, res) => {
+app.get("/_api/people", async (_req, res) => {
   const people = await prisma.person.findMany({
     orderBy: { name: "asc" },
     select: { id: true, name: true, activeWeekly: true, activeBiweekly: true, exceptions: true, shameCount: true },
@@ -298,7 +298,7 @@ app.get("/api/people", async (_req, res) => {
   res.json(people);
 });
 
-app.post("/api/people", async (req, res) => {
+app.post("/_api/people", async (req, res) => {
   const { name } = req.body ?? {};
   if (!name || typeof name !== "string") return res.status(400).json({ error: "name required" });
   const person = await prisma.person.create({
@@ -308,7 +308,7 @@ app.post("/api/people", async (req, res) => {
   res.status(201).json(person);
 });
 
-app.patch("/api/people/:id", async (req, res) => {
+app.patch("/_api/people/:id", async (req, res) => {
   const id = Number(req.params.id);
   const { name, activeWeekly, activeBiweekly, shameCount } = req.body ?? {};
   const person = await prisma.person.update({
@@ -324,7 +324,7 @@ app.patch("/api/people/:id", async (req, res) => {
   res.json(person);
 });
 
-app.patch("/api/people/:id/exceptions", async (req, res) => {
+app.patch("/_api/people/:id/exceptions", async (req, res) => {
   const id = Number(req.params.id);
   const { exceptions } = req.body as { exceptions: string[] };
   const person = await prisma.person.update({
@@ -335,7 +335,7 @@ app.patch("/api/people/:id/exceptions", async (req, res) => {
   res.json(person);
 });
 
-app.delete("/api/people/:id", async (req, res) => {
+app.delete("/_api/people/:id", async (req, res) => {
   const id = Number(req.params.id);
   await prisma.assignment.updateMany({ where: { personId: id }, data: { personId: null } });
   await prisma.person.delete({ where: { id } });
@@ -343,14 +343,14 @@ app.delete("/api/people/:id", async (req, res) => {
 });
 
 // get unavailable
-app.get("/api/people/:id/unavailable", async (req, res) => {
+app.get("/_api/people/:id/unavailable", async (req, res) => {
   const id = Number(req.params.id);
   const p = await prisma.person.findUnique({ where: { id }, select: { unavailable: true } });
   res.json(p?.unavailable ?? []);
 });
 
 // replace unavailable
-app.patch("/api/people/:id/unavailable", async (req, res) => {
+app.patch("/_api/people/:id/unavailable", async (req, res) => {
   const id = Number(req.params.id);
   const { unavailable } = req.body as { unavailable: Array<{from:string; to:string}> };
   const p = await prisma.person.update({ where: { id }, data: { unavailable } });
@@ -360,7 +360,7 @@ app.patch("/api/people/:id/unavailable", async (req, res) => {
 /**
  * ICS for a given person from the latest PUBLISHED plan
  */
-app.get("/api/ics/:personId", async (req: Request, res: Response) => {
+app.get("/_api/ics/:personId", async (req: Request, res: Response) => {
   const personId = Number(req.params.personId);
 
   // 1. Fetch person details to get their name for the filename
@@ -424,17 +424,17 @@ app.get("/api/ics/:personId", async (req: Request, res: Response) => {
 });
 
 /* Duties CRUD (admin-managed fixed/honor lists) */
-app.get('/api/duties', async (_req, res) => {
+app.get('/_api/duties', async (_req, res) => {
   const rows = await prisma.duty.findMany({ orderBy: [{ kind: 'asc' }, { order: 'asc' }] });
   res.json(rows);
 });
-app.post('/api/duties', async (req, res) => {
+app.post('/_api/duties', async (req, res) => {
   const { kind, label, assignees = '', order = 0 } = req.body ?? {};
   if (!kind || !label) return res.status(400).json({ error: 'kind and label required' });
   const row = await prisma.duty.create({ data: { kind, label, assignees, order } });
   res.status(201).json(row);
 });
-app.patch('/api/duties/:id', async (req, res) => {
+app.patch('/_api/duties/:id', async (req, res) => {
   const id = Number(req.params.id);
   const { kind, label, assignees, order } = req.body ?? {};
   const row = await prisma.duty.update({
@@ -448,7 +448,7 @@ app.patch('/api/duties/:id', async (req, res) => {
   });
   res.json(row);
 });
-app.delete('/api/duties/:id', async (req, res) => {
+app.delete('/_api/duties/:id', async (req, res) => {
   const id = Number(req.params.id);
   await prisma.duty.delete({ where: { id } });
   res.json({ ok: true });

@@ -11,11 +11,11 @@ export default function MobilePlan() {
   const [data, setData] = useState<any>(null);
   const [selected, setSelected] = useState<number | undefined>();
   const [week, setWeek] = useState(0);
-  const api = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
-
+  const api = process.env.NEXT_PUBLIC_API_BASE || "/_api";
+  
   useEffect(() => {
     axios
-      .get(api + '/api/plan/current')
+      .get('/_api/plan/current')
       .then((r) => {
         setData(r.data);
         const ppl: Person[] = r.data.people ?? [];
@@ -179,7 +179,7 @@ function TopBar({
         </select>
         <button
           className={`text-sm px-2 py-1 rounded ${!selected ? 'bg-gray-200 text-gray-500' : 'bg-blue-500 text-white'}`}
-          onClick={() => selected && (window.location.href = `${api}/api/ics/${selected}`)}
+          onClick={() => selected && (window.location.href = `/_api/ics/${selected}`)}
           disabled={!selected}
         >
           Export
@@ -190,7 +190,7 @@ function TopBar({
       {/* PDF */}
       <button
         className="text-sm px-3 py-1 rounded border border-gray-300 bg-white"
-        onClick={() => window.open(`${api}/api/plan/pdf`, "_blank")}
+        onClick={() => window.open(`/_api/plan/pdf`, "_blank")}
       >
         PDF Download
       </button>

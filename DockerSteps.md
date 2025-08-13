@@ -69,7 +69,7 @@ The first step is to build multi-architecture Docker images for your application
         image: madasy/aemtli-planner-web:latest
         restart: always
         environment:
-          NEXT_PUBLIC_API_BASE: http://api:4000
+          NEXT_PUBLIC_API_BASE: http://api:4000 
           ADMIN_USERNAMES: ${ADMIN_USERNAMES}
         ports:
           - "80:3000"
@@ -138,6 +138,8 @@ Once your images are on Docker Hub and you have the updated `docker-compose.yml`
     cd /home/jose/aemtli-planner/
     ```
     ```bash
+    docker stop $(docker ps -q)
+    docker pull madasy/aemtli-planner-web:latest
     docker compose up -d --force-recreate
     ```
     * `--force-recreate`:  flag ensures that the containers are rebuilt with the new configuration, including the restart policy.
